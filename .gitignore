@@ -1,0 +1,25 @@
+# Dependencies
+**/node_modules/
+
+# Builds
+**/dist/
+**/build/
+
+# Env files
+**/.env
+**/.env.*
+!**/.env.example
+
+# Runtime artifacts
+**/storage/
+**/logs/
+**/*.log
+**/.wwebjs_auth/
+**/.wwebjs_cache/
+
+# Coverage
+**/coverage/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,13 @@
+import { Router } from 'express';
+import groupsController from '../controllers/GroupsController';
+import { authMiddleware } from '../middleware/auth';
+
+const router = Router();
+
+router.use(authMiddleware);
+
+router.get('/', groupsController.getAll);
+router.get('/:id', groupsController.getById);
+router.put('/:id', groupsController.update);
+
+export default router;
