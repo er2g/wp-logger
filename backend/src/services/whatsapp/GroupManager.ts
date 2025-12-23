@@ -46,6 +46,8 @@ export class GroupManagerService {
             chat_type: chat.chatType,
             is_monitored: true,
             participant_count: chat.participants,
+            profile_picture_url: null,
+            category: null,
           });
           this.monitoredGroups.add(chat.id);
         }
@@ -77,6 +79,8 @@ export class GroupManagerService {
         chat_type: details.chatType,
         is_monitored: true,
         participant_count: details.participants,
+        profile_picture_url: null,
+        category: null,
       });
 
       this.monitoredGroups.add(details.id);
@@ -97,9 +101,15 @@ export class GroupManagerService {
     }
   }
 
-  setMonitoredGroups(groupIds: string[]): void {
-    this.monitoredGroups = new Set(groupIds);
-    logger.info('Monitoring ' + groupIds.length + ' chats');
+  async setMonitoredGroups(groupIds: string[]): Promise<void> {
+    try {
+      await groupRepository.updateMonitoredStatus(groupIds);
+      this.monitoredGroups = new Set(groupIds);
+      logger.info('Monitoring ' + groupIds.length + ' chats');
+    } catch (error) {
+      logger.error('Failed to set monitored groups:', error);
+      throw error;
+    }
   }
 
   isMonitored(groupId: string): boolean {
@@ -123,9 +133,15 @@ export class GroupManagerService {
     return Array.from(this.monitoredGroups);
   }
 
-  clearMonitoredGroups(): void {
-    this.monitoredGroups.clear();
-    logger.info('Cleared all monitored chats');
+  async clearMonitoredGroups(): Promise<void> {
+    try {
+      await groupRepository.updateMonitoredStatus([]);
+      this.monitoredGroups.clear();
+      logger.info('Cleared all monitored chats');
+    } catch (error) {
+      logger.error('Failed to clear monitored groups:', error);
+      throw error;
+    }
   }
 }
 

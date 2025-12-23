@@ -98,6 +98,36 @@ export class GroupRepository {
     }
   }
 
+  async updateMonitoredStatus(monitoredWhatsappIds: string[]): Promise<void> {
+    try {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        // First unmonitor everything
+        await client.query('UPDATE groups SET is_monitored = false, updated_at = NOW()');
+
+        // Then monitor specific ones if any
+        if (monitoredWhatsappIds.length > 0) {
+          await client.query(
+            'UPDATE groups SET is_monitored = true, updated_at = NOW() WHERE whatsapp_id = ANY($1)',
+            [monitoredWhatsappIds]
+          );
+        }
+
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    } catch (error) {
+      logger.error('Failed to update monitored status:', error);
+      throw error;
+    }
+  }
+
   async delete(id: string): Promise<void> {
     try {
       await pool.query('DELETE FROM groups WHERE id = $1', [id]);

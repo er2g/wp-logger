@@ -1,5 +1,5 @@
 import { pool } from '../../../config/database';
-import { Message, MessageType, SearchResult } from '../../../types/database.types';
+import { Message, SearchResult } from '../../../types/database.types';
 import { MessageFilterQuery, AdvancedSearchQuery } from '../../../types/api.types';
 import logger from '../../../utils/logger';
 

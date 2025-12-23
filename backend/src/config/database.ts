@@ -1,5 +1,6 @@
 import { Pool, PoolConfig } from 'pg';
 import * as dotenv from 'dotenv';
+import logger from '../utils/logger';
 
 dotenv.config();
 
@@ -18,7 +19,7 @@ const poolConfig: PoolConfig = {
 export const pool = new Pool(poolConfig);
 
 pool.on('error', (err) => {
-  console.error('Unexpected error on idle client', err);
+  logger.error('Unexpected error on idle client', err);
   process.exit(-1);
 });
 
@@ -27,10 +28,10 @@ export async function testConnection(): Promise<boolean> {
     const client = await pool.connect();
     await client.query('SELECT NOW()');
     client.release();
-    console.log('Database connection successful');
+    logger.info('Database connection successful');
     return true;
   } catch (error) {
-    console.error('Database connection failed:', error);
+    logger.error('Database connection failed:', error);
     return false;
   }
 }
