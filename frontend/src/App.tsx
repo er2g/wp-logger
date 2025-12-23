@@ -8,6 +8,7 @@ import MainLayout from './components/layout/MainLayout';
 import Messages from './components/messages/Messages';
 import Groups from './components/groups/Groups';
 import Settings from './components/settings/Settings';
+import MediaGallery from './components/media/MediaGallery';
 import apiClient from './services/api/ApiClient';
 import { loginSuccess, logout } from './store/slices/authSlice';
 
@@ -119,6 +120,7 @@ const App: React.FC = () => {
         <Route index element={<Dashboard />} />
         <Route path="messages" element={<Messages />} />
         <Route path="groups" element={<Groups />} />
+        <Route path="media" element={<MediaGallery />} />
         <Route path="settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

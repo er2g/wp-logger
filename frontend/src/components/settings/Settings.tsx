@@ -3,18 +3,10 @@ import { useSelector } from 'react-redux';
 import { RootState } from '../../store';
 import apiClient from '../../services/api/ApiClient';
 import {
-  Settings as SettingsIcon,
-  Wifi,
-  WifiOff,
-  RefreshCw,
-  Shield,
-  Clock,
-  Server,
-  Database,
-  HardDrive,
-  CheckCircle,
-  AlertCircle,
-  Info,
+  Settings as SettingsIcon, Wifi, WifiOff, RefreshCw, Shield, Clock,
+  Server, Database, HardDrive, CheckCircle, AlertCircle, Info,
+  Download, FileJson, FileText, FileSpreadsheet, Calendar, Filter,
+  Loader2, Package, Zap, Archive,
 } from 'lucide-react';
 
 interface BotStatusData {
@@ -22,6 +14,8 @@ interface BotStatusData {
   last_connected: string | null;
   last_disconnected: string | null;
   error_message: string | null;
+  phone_number: string | null;
+  device_name: string | null;
 }
 
 interface BotStatusResponse {
@@ -30,11 +24,26 @@ interface BotStatusResponse {
   error?: string;
 }
 
+interface GroupOption {
+  id: string;
+  name: string;
+}
+
 const Settings: React.FC = () => {
   const { user } = useSelector((state: RootState) => state.auth);
   const [botStatus, setBotStatus] = useState<BotStatusData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Export state
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportFormat, setExportFormat] = useState<'json' | 'csv' | 'html'>('json');
+  const [exportGroup, setExportGroup] = useState<string>('all');
+  const [exportStartDate, setExportStartDate] = useState('');
+  const [exportEndDate, setExportEndDate] = useState('');
+  const [exportIncludeMedia, setExportIncludeMedia] = useState(false);
+  const [groups, setGroups] = useState<GroupOption[]>([]);
+  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
 
   const loadBotStatus = async () => {
     setIsLoading(true);
@@ -53,8 +62,20 @@ const Settings: React.FC = () => {
     }
   };
 
+  const loadGroups = async () => {
+    try {
+      const response = await apiClient.get<{ success: boolean; data: GroupOption[] }>('/groups');
+      if (response.success) {
+        setGroups(response.data);
+      }
+    } catch {
+      // Ignore
+    }
+  };
+
   useEffect(() => {
     loadBotStatus();
+    loadGroups();
   }, []);
 
   const formatDate = (dateString: string | null) => {
@@ -62,14 +83,56 @@ const Settings: React.FC = () => {
     return new Date(dateString).toLocaleString();
   };
 
+  const handleExport = async () => {
+    setIsExporting(true);
+    setExportSuccess(null);
+    setError(null);
+
+    try {
+      const options: any = {
+        format: exportFormat,
+        includeMedia: exportIncludeMedia,
+      };
+
+      if (exportGroup !== 'all') {
+        options.groupId = exportGroup;
+      }
+      if (exportStartDate) {
+        options.startDate = new Date(exportStartDate);
+      }
+      if (exportEndDate) {
+        options.endDate = new Date(exportEndDate);
+      }
+
+      const response = await apiClient.postBlob('/export', options);
+      const fileName = `whatsapp-export-${Date.now()}.${exportFormat}`;
+      const blobUrl = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+
+      setExportSuccess(`Export completed: ${fileName}`);
+    } catch (err: any) {
+      setError(err?.message || 'Export failed');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const systemInfo = [
     { label: 'API Endpoint', value: apiClient.getBaseUrl(), icon: Server },
     { label: 'Session User', value: user?.username || 'Unknown', icon: Shield },
     { label: 'Session Type', value: 'Admin', icon: CheckCircle },
+    { label: 'Phone Number', value: botStatus?.phone_number || '-', icon: Zap },
+    { label: 'Device', value: botStatus?.device_name || '-', icon: Package },
   ];
 
   return (
-    <div className="max-w-4xl space-y-6">
+    <div className="max-w-5xl space-y-6">
       {/* Header */}
       <header className="animate-slide-up">
         <div className="flex items-center gap-2 text-violet-600 mb-2">
@@ -78,7 +141,7 @@ const Settings: React.FC = () => {
         </div>
         <h2 className="text-3xl font-bold text-slate-800">Settings</h2>
         <p className="mt-2 text-slate-500">
-          View system status and configuration.
+          System status, export data, and configuration.
         </p>
       </header>
 
@@ -86,8 +149,8 @@ const Settings: React.FC = () => {
       <div className="glass-panel rounded-[24px] p-6 animate-slide-up delay-100">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h3 className="text-lg font-semibold text-slate-800">WhatsApp Bot Status</h3>
-            <p className="text-sm text-slate-500">Connection and health information</p>
+            <h3 className="text-lg font-semibold text-slate-800">WhatsApp Connection</h3>
+            <p className="text-sm text-slate-500">Current bot status and health</p>
           </div>
           <button
             type="button"
@@ -123,9 +186,7 @@ const Settings: React.FC = () => {
               <div className="flex items-center gap-4">
                 <div
                   className={`w-14 h-14 rounded-xl flex items-center justify-center ${
-                    botStatus.is_connected
-                      ? 'bg-emerald-100'
-                      : 'bg-rose-100'
+                    botStatus.is_connected ? 'bg-emerald-100' : 'bg-rose-100'
                   }`}
                 >
                   {botStatus.is_connected ? (
@@ -185,8 +246,152 @@ const Settings: React.FC = () => {
         )}
       </div>
 
-      {/* System Information */}
+      {/* Export Section */}
       <div className="glass-panel rounded-[24px] p-6 animate-slide-up delay-200">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
+            <Archive className="w-5 h-5 text-emerald-600" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800">Export Data</h3>
+            <p className="text-sm text-slate-500">Download your message archive</p>
+          </div>
+        </div>
+
+        {exportSuccess && (
+          <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-700 flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 flex-shrink-0" />
+            {exportSuccess}
+          </div>
+        )}
+
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* Format Selection */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Export Format</label>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                onClick={() => setExportFormat('json')}
+                className={`p-3 rounded-xl border-2 transition-all flex flex-col items-center gap-1 ${
+                  exportFormat === 'json'
+                    ? 'border-violet-500 bg-violet-50 text-violet-700'
+                    : 'border-slate-200 hover:border-violet-300'
+                }`}
+              >
+                <FileJson className="w-5 h-5" />
+                <span className="text-xs font-medium">JSON</span>
+              </button>
+              <button
+                onClick={() => setExportFormat('csv')}
+                className={`p-3 rounded-xl border-2 transition-all flex flex-col items-center gap-1 ${
+                  exportFormat === 'csv'
+                    ? 'border-violet-500 bg-violet-50 text-violet-700'
+                    : 'border-slate-200 hover:border-violet-300'
+                }`}
+              >
+                <FileSpreadsheet className="w-5 h-5" />
+                <span className="text-xs font-medium">CSV</span>
+              </button>
+              <button
+                onClick={() => setExportFormat('html')}
+                className={`p-3 rounded-xl border-2 transition-all flex flex-col items-center gap-1 ${
+                  exportFormat === 'html'
+                    ? 'border-violet-500 bg-violet-50 text-violet-700'
+                    : 'border-slate-200 hover:border-violet-300'
+                }`}
+              >
+                <FileText className="w-5 h-5" />
+                <span className="text-xs font-medium">HTML</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Group Selection */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              <Filter className="w-4 h-4 inline mr-1" />
+              Select Chat
+            </label>
+            <select
+              className="glass-select w-full"
+              value={exportGroup}
+              onChange={(e) => setExportGroup(e.target.value)}
+            >
+              <option value="all">All chats</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>{g.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Date Range */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              <Calendar className="w-4 h-4 inline mr-1" />
+              Start Date
+            </label>
+            <input
+              type="date"
+              className="glass-input w-full"
+              value={exportStartDate}
+              onChange={(e) => setExportStartDate(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              <Calendar className="w-4 h-4 inline mr-1" />
+              End Date
+            </label>
+            <input
+              type="date"
+              className="glass-input w-full"
+              value={exportEndDate}
+              onChange={(e) => setExportEndDate(e.target.value)}
+            />
+          </div>
+
+          {/* Include Media Option */}
+          <div className="md:col-span-2">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={exportIncludeMedia}
+                onChange={(e) => setExportIncludeMedia(e.target.checked)}
+                className="w-5 h-5 rounded-lg border-2 border-slate-300 text-violet-600 focus:ring-violet-500"
+              />
+              <div>
+                <p className="text-sm font-medium text-slate-700">Include media metadata</p>
+                <p className="text-xs text-slate-500">Add media file information to the export</p>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        {/* Export Button */}
+        <div className="mt-6 flex justify-end">
+          <button
+            onClick={handleExport}
+            disabled={isExporting}
+            className="glass-button-solid !py-3 !px-6"
+          >
+            {isExporting ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Exporting...
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4 mr-2" />
+                Export Data
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* System Information */}
+      <div className="glass-panel rounded-[24px] p-6 animate-slide-up delay-300">
         <div className="mb-6">
           <h3 className="text-lg font-semibold text-slate-800">System Information</h3>
           <p className="text-sm text-slate-500">Current session and connection details</p>
@@ -213,7 +418,7 @@ const Settings: React.FC = () => {
       </div>
 
       {/* Storage Info */}
-      <div className="glass-panel rounded-[24px] p-6 animate-slide-up delay-300">
+      <div className="glass-panel rounded-[24px] p-6 animate-slide-up delay-400">
         <div className="mb-6">
           <h3 className="text-lg font-semibold text-slate-800">Storage</h3>
           <p className="text-sm text-slate-500">Media and database information</p>
@@ -247,8 +452,8 @@ const Settings: React.FC = () => {
       </div>
 
       {/* Version Info */}
-      <div className="text-center py-4 text-sm text-slate-400 animate-slide-up delay-400">
-        WP Logger v1.0.0 &middot; Built with React & TailwindCSS
+      <div className="text-center py-4 text-sm text-slate-400 animate-slide-up delay-500">
+        WP Logger v2.0.0 &middot; Message Archive System
       </div>
     </div>
   );

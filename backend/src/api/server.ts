@@ -8,6 +8,7 @@ import messagesRoutes from './routes/messages.routes';
 import mediaRoutes from './routes/media.routes';
 import botRoutes from './routes/bot.routes';
 import statsRoutes from './routes/stats.routes';
+import exportRoutes from './routes/export.routes';
 import { errorHandler } from './middleware/errorHandler';
 import { apiLimiter } from './middleware/rateLimit';
 import logger from '../utils/logger';
@@ -64,6 +65,7 @@ export class ExpressServer {
     this.app.use('/api/v1/media', mediaRoutes);
     this.app.use('/api/v1/bot', botRoutes);
     this.app.use('/api/v1/stats', statsRoutes);
+    this.app.use('/api/v1/export', exportRoutes);
 
     this.app.use('*', (_req, res) => {
       res.status(404).json({

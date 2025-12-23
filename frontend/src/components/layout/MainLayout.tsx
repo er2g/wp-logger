@@ -6,7 +6,7 @@ import { logout } from '../../store/slices/authSlice';
 import webAuthnClient from '../../services/auth/WebAuthnClient';
 import apiClient from '../../services/api/ApiClient';
 import webSocketService from '../../services/websocket/WebSocketService';
-import { LogOut, LayoutDashboard, MessageSquare, Users, Settings, Sparkles } from 'lucide-react';
+import { LogOut, LayoutDashboard, MessageSquare, Users, Settings, Sparkles, Image } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
   const { user, isAuthenticated, accessToken } = useSelector((state: RootState) => state.auth);
@@ -48,6 +48,7 @@ const MainLayout: React.FC = () => {
     { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
     { to: '/messages', icon: MessageSquare, label: 'Messages' },
     { to: '/groups', icon: Users, label: 'Groups' },
+    { to: '/media', icon: Image, label: 'Media' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ];
 
