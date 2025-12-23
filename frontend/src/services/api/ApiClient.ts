@@ -110,6 +110,11 @@ class ApiClient {
     const response = await this.client.delete<T>(url);
     return response.data;
   }
+
+  async postBlob(url: string, data?: any): Promise<{ data: Blob; headers: Record<string, string> }> {
+    const response = await this.client.post(url, data, { responseType: 'blob' });
+    return { data: response.data, headers: response.headers as Record<string, string> };
+  }
 }
 
 export default new ApiClient();

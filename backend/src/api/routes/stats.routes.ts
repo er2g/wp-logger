@@ -6,6 +6,13 @@ const router = Router();
 
 router.use(authMiddleware);
 
-router.get('/', statsController.getStats);
+// Dashboard stats
+router.get('/', statsController.getStats.bind(statsController));
+
+// Activity timeline
+router.get('/timeline', statsController.getActivityTimeline.bind(statsController));
+
+// Group-specific stats
+router.get('/groups/:id', statsController.getGroupStats.bind(statsController));
 
 export default router;
