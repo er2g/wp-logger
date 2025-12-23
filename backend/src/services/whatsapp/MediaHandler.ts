@@ -112,6 +112,11 @@ export class MediaHandlerService {
         duration,
         width,
         height,
+        caption: null,
+        is_gif: false,
+        is_animated: false,
+        page_count: null,
+        blur_hash: null,
       });
 
       const processedMedia: ProcessedMedia = {

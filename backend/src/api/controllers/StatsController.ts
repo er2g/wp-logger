@@ -2,7 +2,6 @@ import { Response } from 'express';
 import { AuthRequest, StatsQuery } from '../../types/api.types';
 import groupRepository from '../../services/database/repositories/GroupRepository';
 import messageRepository from '../../services/database/repositories/MessageRepository';
-import mediaRepository from '../../services/database/repositories/MediaRepository';
 import fileStorageService from '../../services/storage/FileStorage';
 import { pool } from '../../config/database';
 import logger from '../../utils/logger';
@@ -106,7 +105,7 @@ export class StatsController {
         ),
 
         // Storage stats
-        fileStorageService.getStorageStats(),
+        fileStorageService.getStorageStats ? fileStorageService.getStorageStats() : Promise.resolve({ totalSize: 0 }),
       ]);
 
       // Today and this week counts
@@ -168,9 +167,9 @@ export class StatsController {
         totalMessages: parseInt(totalMessagesResult.rows[0].count, 10),
         totalMedia: parseInt(totalMediaResult.rows[0].count, 10),
         totalGroups: groupsResult.length,
-        monitoredGroups: groupsResult.filter(g => g.is_monitored).length,
-        dmCount: groupsResult.filter(g => g.chat_type === 'dm').length,
-        groupCount: groupsResult.filter(g => g.chat_type === 'group').length,
+        monitoredGroups: groupsResult.filter((g: any) => g.is_monitored).length,
+        dmCount: groupsResult.filter((g: any) => g.chat_type === 'dm').length,
+        groupCount: groupsResult.filter((g: any) => g.chat_type === 'group').length,
         messagesToday: parseInt(todayResult.rows[0].count, 10),
         messagesThisWeek: parseInt(weekResult.rows[0].count, 10),
         messagesThisMonth: parseInt(monthResult.rows[0].count, 10),
