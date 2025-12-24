@@ -6,6 +6,7 @@ import logger from '../utils/logger';
 interface AuthenticatedWebSocket extends WebSocket {
   userId?: string;
   username?: string;
+  role?: 'admin' | 'user';
   subscribedGroups?: Set<string>;
 }
 
@@ -13,6 +14,7 @@ export class WebSocketServer {
   private wss: WSServer | null = null;
   private clients: Map<string, AuthenticatedWebSocket> = new Map();
   private connectionCallbacks: ((ws: WebSocket) => void)[] = [];
+  private authCallbacks: ((ws: AuthenticatedWebSocket) => void)[] = [];
 
   initialize(server: HTTPServer): void {
     this.wss = new WSServer({ server, path: '/ws' });
@@ -60,6 +62,10 @@ export class WebSocketServer {
     this.connectionCallbacks.push(callback);
   }
 
+  onAuthenticated(callback: (ws: AuthenticatedWebSocket) => void): void {
+    this.authCallbacks.push(callback);
+  }
+
   private handleMessage(ws: AuthenticatedWebSocket, data: any, timeout: NodeJS.Timeout): void {
     switch (data.type) {
       case 'authenticate':
@@ -89,12 +95,15 @@ export class WebSocketServer {
 
       ws.userId = payload.userId;
       ws.username = payload.username;
+      ws.role = payload.role;
 
       this.clients.set(payload.userId, ws);
 
       clearTimeout(timeout);
 
       ws.send(JSON.stringify({ type: 'authenticated', success: true }));
+
+      this.authCallbacks.forEach((cb) => cb(ws));
 
       logger.info(`WebSocket client authenticated: ${payload.username}`);
     } catch (error) {
@@ -138,11 +147,35 @@ export class WebSocketServer {
     const message = JSON.stringify({ type, data });
 
     this.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        if (!groupId || client.subscribedGroups?.has(groupId)) {
-          client.send(message);
-        }
+      if (client.readyState !== WebSocket.OPEN) {
+        return;
       }
+
+      if (groupId && !client.subscribedGroups?.has(groupId)) {
+        return;
+      }
+
+      client.send(message);
+    });
+  }
+
+  broadcastToRoles(roles: Array<'admin' | 'user'>, type: string, data: any, groupId?: string): void {
+    const message = JSON.stringify({ type, data });
+
+    this.clients.forEach((client) => {
+      if (client.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      if (!client.role || !roles.includes(client.role)) {
+        return;
+      }
+
+      if (groupId && !client.subscribedGroups?.has(groupId)) {
+        return;
+      }
+
+      client.send(message);
     });
   }
 

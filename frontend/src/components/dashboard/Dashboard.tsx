@@ -9,9 +9,9 @@ import {
   XAxis, YAxis, CartesianGrid, BarChart, Bar,
 } from 'recharts';
 import {
-  MessageSquare, Users, Image, Video, FileText, Music, Sticker,
+  MessageSquare, Users, Image,
   TrendingUp, Activity, HardDrive, ArrowRight, Clock, Calendar,
-  Download, Zap, MessageCircle, UserCheck, ChevronRight,
+  Download, MessageCircle, UserCheck, ChevronRight,
 } from 'lucide-react';
 
 interface StatsData {
@@ -52,28 +52,6 @@ const mediaTypeColors: Record<string, string> = {
   document: '#3b82f6',
   sticker: '#ec4899',
   gif: '#10b981',
-};
-
-const messageTypeColors: Record<string, string> = {
-  text: '#64748b',
-  image: '#8b5cf6',
-  video: '#d946ef',
-  audio: '#f59e0b',
-  voice: '#f97316',
-  document: '#3b82f6',
-  sticker: '#ec4899',
-  location: '#10b981',
-  contact: '#6366f1',
-  poll: '#14b8a6',
-};
-
-const mediaTypeIcons: Record<string, React.ReactNode> = {
-  image: <Image className="w-4 h-4" />,
-  video: <Video className="w-4 h-4" />,
-  audio: <Music className="w-4 h-4" />,
-  voice: <Music className="w-4 h-4" />,
-  document: <FileText className="w-4 h-4" />,
-  sticker: <Sticker className="w-4 h-4" />,
 };
 
 const formatBytes = (bytes: number): string => {

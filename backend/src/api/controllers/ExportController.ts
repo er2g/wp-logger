@@ -128,7 +128,7 @@ export class ExportController {
       const format = (req.query.format as string) || 'json';
 
       const group = await groupRepository.findById(id);
-      if (!group) {
+      if (!group || !group.is_monitored) {
         res.status(404).json({
           success: false,
           error: 'Group not found',

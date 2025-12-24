@@ -7,6 +7,7 @@ import apiClient from '../../services/api/ApiClient';
 import { Lock, Loader2, Sparkles, ShieldCheck } from 'lucide-react';
 
 const Login: React.FC = () => {
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const navigate = useNavigate();
   const dispatch = useDispatch();
@@ -14,7 +15,7 @@ const Login: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password.trim()) return;
+    if (!username.trim() || !password.trim()) return;
 
     dispatch(loginStart());
     try {
@@ -26,10 +27,11 @@ const Login: React.FC = () => {
           user: {
             id: string;
             username: string;
+            role: 'admin' | 'user';
           };
         };
         error?: string;
-      }>('/auth/login/password', { password });
+      }>('/auth/login/password', { username, password });
 
       if (response.success) {
         const { user, accessToken } = response.data;
@@ -65,7 +67,7 @@ const Login: React.FC = () => {
         <div className="text-center mb-10">
           <h1 className="text-3xl font-bold gradient-text mb-2">Welcome Back</h1>
           <p className="text-slate-500 text-sm">
-            Enter your admin password to access the control center
+            Sign in with your assigned username and password
           </p>
         </div>
 
@@ -73,10 +75,34 @@ const Login: React.FC = () => {
         <form className="space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-2">
             <label
+              htmlFor="username"
+              className="block text-xs font-semibold uppercase tracking-wider text-violet-600"
+            >
+              Username
+            </label>
+            <div className="relative">
+              <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-violet-400" />
+              <input
+                id="username"
+                name="username"
+                type="text"
+                required
+                className="glass-input pl-12 !py-4 !rounded-2xl"
+                placeholder="Enter your username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                disabled={isLoading}
+                autoComplete="username"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label
               htmlFor="password"
               className="block text-xs font-semibold uppercase tracking-wider text-violet-600"
             >
-              Admin Password
+              Password
             </label>
             <div className="relative">
               <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-violet-400" />
@@ -90,6 +116,7 @@ const Login: React.FC = () => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={isLoading}
+                autoComplete="current-password"
               />
             </div>
           </div>

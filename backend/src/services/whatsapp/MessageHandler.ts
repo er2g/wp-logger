@@ -1,34 +1,27 @@
-import { Message } from 'whatsapp-web.js';
 import logger from '../../utils/logger';
 import messageRepository from '../database/repositories/MessageRepository';
 import groupRepository from '../database/repositories/GroupRepository';
 import { ProcessedMessage } from '../../types/whatsapp.types';
 import { MessageType } from '../../types/database.types';
+import { IncomingMessage } from './IncomingMessage';
 
 export class MessageHandlerService {
   async processMessage(
-    message: Message,
+    message: IncomingMessage,
     groupId: string,
     options?: { updateGroupTimestamp?: boolean; skipContactFetch?: boolean }
   ): Promise<ProcessedMessage | null> {
     try {
-      let senderNumber: string | null = null;
-      let senderName: string | null = null;
+      let senderNumber = message.senderNumber || null;
+      let senderName = message.senderName || null;
 
-      if (!options?.skipContactFetch) {
-        try {
-          const contact = await message.getContact();
-          senderNumber = contact.id.user || contact.id._serialized;
-          senderName = contact.name || contact.pushname || 'Unknown';
-        } catch (error) {
-          logger.warn('Failed to fetch contact for message, using metadata fallback', error);
-        }
+      if (!senderNumber) {
+        senderNumber = message.author || message.from || message.to || null;
       }
 
-      if (!senderNumber || !senderName) {
-        const rawMessage = message as any;
-        senderNumber = senderNumber || rawMessage?.author || rawMessage?.from || rawMessage?.to || null;
-        senderName = senderName || rawMessage?._data?.notifyName || rawMessage?._data?.sender?.pushname || 'Unknown';
+      if (!senderName) {
+        const rawMessage = message.raw as { pushName?: string } | undefined;
+        senderName = rawMessage?.pushName || 'Unknown';
       }
 
       const messageType = this.determineMessageType(message);
@@ -75,7 +68,7 @@ export class MessageHandlerService {
     }
   }
 
-  private determineMessageType(message: Message): MessageType {
+  private determineMessageType(message: IncomingMessage): MessageType {
     if (message.type === 'chat') {
       return 'text';
     } else if (message.type === 'image') {
@@ -97,13 +90,13 @@ export class MessageHandlerService {
     return 'text';
   }
 
-  isGroupMessage(message: Message): boolean {
+  isGroupMessage(message: IncomingMessage): boolean {
     const from = message.from || '';
     const to = (message as any).to || '';
     return from.includes('@g.us') || to.includes('@g.us');
   }
 
-  extractGroupId(message: Message): string | null {
+  extractGroupId(message: IncomingMessage): string | null {
     const rawMessage = message as any;
     const chatId = message.fromMe ? rawMessage?.to : message.from;
     if (!chatId || chatId === 'status@broadcast') {
@@ -112,7 +105,7 @@ export class MessageHandlerService {
     return chatId;
   }
 
-  shouldProcessMessage(message: Message): boolean {
+  shouldProcessMessage(message: IncomingMessage): boolean {
     return Boolean(this.extractGroupId(message));
   }
 }

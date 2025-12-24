@@ -15,7 +15,10 @@ export class MessageRepository {
   async findAll(): Promise<Message[]> {
     try {
       const result = await pool.query<Message>(
-        'SELECT * FROM messages ORDER BY timestamp DESC'
+        `SELECT m.* FROM messages m
+         JOIN groups g ON m.group_id = g.id
+         WHERE g.is_monitored = true
+         ORDER BY m.timestamp DESC`
       );
       return result.rows;
     } catch (error) {
@@ -32,7 +35,7 @@ export class MessageRepository {
       const sortBy = filters.sortBy || 'timestamp';
       const sortOrder = filters.sortOrder === 'asc' ? 'ASC' : 'DESC';
 
-      const conditions: string[] = [];
+      const conditions: string[] = ['g.is_monitored = true'];
       const params: any[] = [];
       let paramIndex = 1;
 
@@ -90,13 +93,14 @@ export class MessageRepository {
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
       // Get total count
-      const countQuery = `SELECT COUNT(*) FROM messages m ${whereClause}`;
+      const countQuery = `SELECT COUNT(*) FROM messages m JOIN groups g ON m.group_id = g.id ${whereClause}`;
       const countResult = await pool.query(countQuery, params);
       const total = parseInt(countResult.rows[0].count, 10);
 
       // Get paginated data
       const dataQuery = `
         SELECT m.* FROM messages m
+        JOIN groups g ON m.group_id = g.id
         ${whereClause}
         ORDER BY m.${sortBy} ${sortOrder}
         LIMIT $${paramIndex++} OFFSET $${paramIndex++}
@@ -121,7 +125,9 @@ export class MessageRepository {
   async findById(id: string): Promise<Message | null> {
     try {
       const result = await pool.query<Message>(
-        'SELECT * FROM messages WHERE id = $1',
+        `SELECT m.* FROM messages m
+         JOIN groups g ON m.group_id = g.id
+         WHERE m.id = $1 AND g.is_monitored = true`,
         [id]
       );
       return result.rows[0] || null;
@@ -134,7 +140,9 @@ export class MessageRepository {
   async findByWhatsappMessageId(whatsappMessageId: string): Promise<Message | null> {
     try {
       const result = await pool.query<Message>(
-        'SELECT * FROM messages WHERE whatsapp_message_id = $1',
+        `SELECT m.* FROM messages m
+         JOIN groups g ON m.group_id = g.id
+         WHERE m.whatsapp_message_id = $1 AND g.is_monitored = true`,
         [whatsappMessageId]
       );
       return result.rows[0] || null;
@@ -144,9 +152,40 @@ export class MessageRepository {
     }
   }
 
+  async findMissingMediaMessages(limit: number, lookbackHours?: number): Promise<Message[]> {
+    try {
+      const params: any[] = [limit];
+      let whereClause = 'm.has_media = true AND md.id IS NULL AND g.is_monitored = true';
+
+      if (lookbackHours && lookbackHours > 0) {
+        params.push(lookbackHours);
+        whereClause += ` AND m.timestamp >= NOW() - ($${params.length} * INTERVAL '1 hour')`;
+      }
+
+      const result = await pool.query<Message>(
+        `SELECT m.*
+         FROM messages m
+         LEFT JOIN media md ON md.message_id = m.id
+         JOIN groups g ON m.group_id = g.id
+         WHERE ${whereClause}
+         ORDER BY m.timestamp DESC
+         LIMIT $1`,
+        params
+      );
+
+      return result.rows;
+    } catch (error) {
+      logger.error('Failed to find messages missing media:', error);
+      throw error;
+    }
+  }
+
   async findByGroupId(groupId: string, limit?: number): Promise<Message[]> {
     try {
-      let query = 'SELECT * FROM messages WHERE group_id = $1 ORDER BY timestamp DESC';
+      let query = `SELECT m.* FROM messages m
+        JOIN groups g ON m.group_id = g.id
+        WHERE m.group_id = $1 AND g.is_monitored = true
+        ORDER BY m.timestamp DESC`;
       const params: any[] = [groupId];
 
       if (limit) {
@@ -167,14 +206,16 @@ export class MessageRepository {
       const likeQuery = `%${query}%`;
       if (groupId) {
         const result = await pool.query<Message>(
-          `SELECT * FROM messages
-           WHERE group_id = $2
+          `SELECT m.* FROM messages m
+           JOIN groups g ON m.group_id = g.id
+           WHERE m.group_id = $2
+           AND g.is_monitored = true
            AND (
-             content ILIKE $1
-             OR sender_name ILIKE $1
-             OR sender_number ILIKE $1
+             m.content ILIKE $1
+             OR m.sender_name ILIKE $1
+             OR m.sender_number ILIKE $1
            )
-           ORDER BY timestamp DESC
+           ORDER BY m.timestamp DESC
            LIMIT 100`,
           [likeQuery, groupId]
         );
@@ -182,10 +223,14 @@ export class MessageRepository {
       }
 
       const result = await pool.query<Message>(
-        `SELECT * FROM messages
-         WHERE content ILIKE $1
-         OR sender_name ILIKE $1
-         OR sender_number ILIKE $1
+        `SELECT m.* FROM messages m
+         JOIN groups g ON m.group_id = g.id
+         WHERE g.is_monitored = true
+         AND (
+           m.content ILIKE $1
+           OR m.sender_name ILIKE $1
+           OR m.sender_number ILIKE $1
+         )
          ORDER BY timestamp DESC
          LIMIT 100`,
         [likeQuery]
@@ -203,7 +248,7 @@ export class MessageRepository {
       const limit = Math.min(100, Math.max(1, parseInt(filters.limit || '50', 10)));
       const offset = (page - 1) * limit;
 
-      const conditions: string[] = [];
+      const conditions: string[] = ['g.is_monitored = true'];
       const params: any[] = [];
       let paramIndex = 1;
 
@@ -252,7 +297,7 @@ export class MessageRepository {
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
       // Get total count
-      const countQuery = `SELECT COUNT(*) FROM messages m ${whereClause}`;
+      const countQuery = `SELECT COUNT(*) FROM messages m JOIN groups g ON m.group_id = g.id ${whereClause}`;
       const countResult = await pool.query(countQuery, params);
       const total = parseInt(countResult.rows[0].count, 10);
 
@@ -281,7 +326,7 @@ export class MessageRepository {
           END as highlight,
           1 as score
         FROM messages m
-        LEFT JOIN groups g ON m.group_id = g.id
+        JOIN groups g ON m.group_id = g.id
         ${whereClause}
         ORDER BY ${orderBy}
         LIMIT $${paramIndex + 1} OFFSET $${paramIndex + 2}
@@ -311,22 +356,22 @@ export class MessageRepository {
     topSenders: Array<{ sender_name: string; sender_number: string; count: number }>;
   }> {
     try {
-      const conditions: string[] = [];
+      const conditions: string[] = ['g.is_monitored = true'];
       const params: any[] = [];
       let paramIndex = 1;
 
       if (groupId) {
-        conditions.push(`group_id = $${paramIndex++}`);
+        conditions.push(`m.group_id = $${paramIndex++}`);
         params.push(groupId);
       }
 
       if (startDate) {
-        conditions.push(`timestamp >= $${paramIndex++}`);
+        conditions.push(`m.timestamp >= $${paramIndex++}`);
         params.push(startDate);
       }
 
       if (endDate) {
-        conditions.push(`timestamp <= $${paramIndex++}`);
+        conditions.push(`m.timestamp <= $${paramIndex++}`);
         params.push(endDate);
       }
 
@@ -334,14 +379,14 @@ export class MessageRepository {
 
       // Total count
       const totalResult = await pool.query(
-        `SELECT COUNT(*) FROM messages ${whereClause}`,
+        `SELECT COUNT(*) FROM messages m JOIN groups g ON m.group_id = g.id ${whereClause}`,
         params
       );
       const total = parseInt(totalResult.rows[0].count, 10);
 
       // By type
       const byTypeResult = await pool.query(
-        `SELECT message_type, COUNT(*) as count FROM messages ${whereClause} GROUP BY message_type`,
+        `SELECT m.message_type, COUNT(*) as count FROM messages m JOIN groups g ON m.group_id = g.id ${whereClause} GROUP BY m.message_type`,
         params
       );
       const byType: Record<string, number> = {};
@@ -351,9 +396,9 @@ export class MessageRepository {
 
       // By day (last 30 days)
       const byDayResult = await pool.query(
-        `SELECT DATE(timestamp) as date, COUNT(*) as count
-         FROM messages ${whereClause}
-         GROUP BY DATE(timestamp)
+        `SELECT DATE(m.timestamp) as date, COUNT(*) as count
+         FROM messages m JOIN groups g ON m.group_id = g.id ${whereClause}
+         GROUP BY DATE(m.timestamp)
          ORDER BY date DESC
          LIMIT 30`,
         params
@@ -365,8 +410,8 @@ export class MessageRepository {
 
       // By hour
       const byHourResult = await pool.query(
-        `SELECT EXTRACT(HOUR FROM timestamp) as hour, COUNT(*) as count
-         FROM messages ${whereClause}
+        `SELECT EXTRACT(HOUR FROM m.timestamp) as hour, COUNT(*) as count
+         FROM messages m JOIN groups g ON m.group_id = g.id ${whereClause}
          GROUP BY hour
          ORDER BY hour`,
         params
@@ -378,9 +423,9 @@ export class MessageRepository {
 
       // Top senders
       const topSendersResult = await pool.query(
-        `SELECT sender_name, sender_number, COUNT(*) as count
-         FROM messages ${whereClause}
-         GROUP BY sender_name, sender_number
+        `SELECT m.sender_name, m.sender_number, COUNT(*) as count
+         FROM messages m JOIN groups g ON m.group_id = g.id ${whereClause}
+         GROUP BY m.sender_name, m.sender_number
          ORDER BY count DESC
          LIMIT 10`,
         params
@@ -535,7 +580,11 @@ export class MessageRepository {
   async getRecentMessages(limit: number = 50): Promise<Message[]> {
     try {
       const result = await pool.query<Message>(
-        'SELECT * FROM messages ORDER BY timestamp DESC LIMIT $1',
+        `SELECT m.* FROM messages m
+         JOIN groups g ON m.group_id = g.id
+         WHERE g.is_monitored = true
+         ORDER BY m.timestamp DESC
+         LIMIT $1`,
         [limit]
       );
       return result.rows;

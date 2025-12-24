@@ -5,6 +5,7 @@ import userRepository from '../../services/database/repositories/UserRepository'
 import webauthnService from '../../services/auth/WebAuthnService';
 import jwtService from '../../services/auth/JWTService';
 import logger from '../../utils/logger';
+import bcrypt from 'bcrypt';
 
 export class AuthController {
   async registerStart(req: AuthRequest, res: Response): Promise<void> {
@@ -14,7 +15,7 @@ export class AuthController {
       let user = await userRepository.findByUsername(username);
 
       if (!user) {
-        user = await userRepository.create(username);
+        user = await userRepository.create(username, { role: 'user' });
         logger.info(`New user created: ${username}`);
       }
 
@@ -48,6 +49,21 @@ export class AuthController {
         });
         return;
       }
+      if (!user.is_active) {
+        res.status(403).json({
+          success: false,
+          error: 'User is inactive',
+        });
+        return;
+      }
+
+      if (!user.is_active) {
+        res.status(403).json({
+          success: false,
+          error: 'User is inactive',
+        });
+        return;
+      }
 
       const verification = await webauthnService.verifyRegistration(
         username,
@@ -78,8 +94,8 @@ export class AuthController {
         null
       );
 
-      const accessToken = jwtService.generateAccessToken(user.id, user.username);
-      const refreshToken = jwtService.generateRefreshToken(user.id, user.username);
+      const accessToken = jwtService.generateAccessToken(user.id, user.username, user.role);
+      const refreshToken = jwtService.generateRefreshToken(user.id, user.username, user.role);
 
       res.cookie('refreshToken', refreshToken, {
         httpOnly: true,
@@ -94,6 +110,7 @@ export class AuthController {
         user: {
           id: user.id,
           username: user.username,
+          role: user.role,
         },
       };
 
@@ -121,6 +138,14 @@ export class AuthController {
         res.status(404).json({
           success: false,
           error: 'User not found',
+        });
+        return;
+      }
+
+      if (!user.is_active) {
+        res.status(403).json({
+          success: false,
+          error: 'User is inactive',
         });
         return;
       }
@@ -209,8 +234,8 @@ export class AuthController {
 
       await userRepository.updateLastLogin(user.id);
 
-      const accessToken = jwtService.generateAccessToken(user.id, user.username);
-      const refreshToken = jwtService.generateRefreshToken(user.id, user.username);
+      const accessToken = jwtService.generateAccessToken(user.id, user.username, user.role);
+      const refreshToken = jwtService.generateRefreshToken(user.id, user.username, user.role);
 
       res.cookie('refreshToken', refreshToken, {
         httpOnly: true,
@@ -225,6 +250,7 @@ export class AuthController {
         user: {
           id: user.id,
           username: user.username,
+          role: user.role,
         },
       };
 
@@ -245,7 +271,7 @@ export class AuthController {
 
   async passwordLogin(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { password } = req.body;
+      const { username, password } = req.body;
       if (!password) {
         res.status(400).json({
           success: false,
@@ -254,7 +280,68 @@ export class AuthController {
         return;
       }
 
+      const adminUsername = process.env.ADMIN_USERNAME || 'admin';
       const expectedPassword = process.env.ADMIN_PASSWORD;
+
+      if (username) {
+        const user = await userRepository.findByUsername(username);
+
+        if (user && !user.is_active) {
+          res.status(403).json({
+            success: false,
+            error: 'User is inactive',
+          });
+          return;
+        }
+
+        if (user?.password_hash) {
+          const matches = await bcrypt.compare(password, user.password_hash);
+          if (!matches) {
+            res.status(401).json({
+              success: false,
+              error: 'Invalid password',
+            });
+            return;
+          }
+
+          await userRepository.updateLastLogin(user.id);
+
+          const accessToken = jwtService.generateAccessToken(user.id, user.username, user.role);
+          const refreshToken = jwtService.generateRefreshToken(user.id, user.username, user.role);
+
+          res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+          });
+
+          const response: TokenResponse = {
+            accessToken,
+            expiresIn: '15m',
+            user: {
+              id: user.id,
+              username: user.username,
+              role: user.role,
+            },
+          };
+
+          res.json({
+            success: true,
+            data: response,
+          });
+          return;
+        }
+
+        if (username !== adminUsername) {
+          res.status(400).json({
+            success: false,
+            error: 'Password login is not configured for this user',
+          });
+          return;
+        }
+      }
+
       if (!expectedPassword) {
         logger.error('ADMIN_PASSWORD is not set');
         res.status(500).json({
@@ -272,10 +359,19 @@ export class AuthController {
         return;
       }
 
-      const adminUsername = process.env.ADMIN_USERNAME || 'admin';
       let user = await userRepository.findByUsername(adminUsername);
       if (!user) {
-        user = await userRepository.create(adminUsername);
+        user = await userRepository.create(adminUsername, { role: 'admin' });
+      } else if (user.role !== 'admin') {
+        await userRepository.updateRole(user.id, 'admin');
+        user = await userRepository.findById(user.id);
+      }
+      if (!user) {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to resolve admin user',
+        });
+        return;
       }
 
       await userRepository.updateLastLogin(user.id);
@@ -284,6 +380,7 @@ export class AuthController {
       const accessToken = jwtService.generateAccessToken(
         user.id,
         user.username,
+        'admin',
         sessionExpiry
       );
 
@@ -301,6 +398,7 @@ export class AuthController {
         user: {
           id: user.id,
           username: user.username,
+          role: 'admin',
         },
       };
 
@@ -350,6 +448,7 @@ export class AuthController {
         data: {
           id: user.id,
           username: user.username,
+          role: user.role,
           createdAt: user.created_at,
           lastLogin: user.last_login,
         },

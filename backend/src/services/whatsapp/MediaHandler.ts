@@ -1,4 +1,3 @@
-import { Message } from 'whatsapp-web.js';
 import * as mime from 'mime-types';
 import * as path from 'path';
 import logger from '../../utils/logger';
@@ -8,10 +7,11 @@ import whatsappService from './WhatsAppService';
 import mediaRepository from '../database/repositories/MediaRepository';
 import { ProcessedMedia } from '../../types/whatsapp.types';
 import { MediaType } from '../../types/database.types';
+import { IncomingMessage } from './IncomingMessage';
 
 export class MediaHandlerService {
   async processMediaMessage(
-    message: Message,
+    message: IncomingMessage,
     groupId: string,
     messageId: string
   ): Promise<ProcessedMedia | null> {
@@ -25,19 +25,14 @@ export class MediaHandlerService {
         return null;
       }
 
-      const mediaBuffer = await whatsappService.downloadMedia(message);
-      if (!mediaBuffer || mediaBuffer.length === 0) {
+      const mediaResult = await whatsappService.downloadMedia(message);
+      if (!mediaResult || mediaResult.buffer.length === 0) {
         logger.warn(`Empty media buffer for message ${message.id._serialized}`);
         return null;
       }
 
-      const media = await message.downloadMedia();
-      if (!media) {
-        return null;
-      }
-
-      const mimeType = media.mimetype;
-      const baseFileName = media.filename || `media_${Date.now()}`;
+      const mimeType = mediaResult.mimetype || 'application/octet-stream';
+      const baseFileName = mediaResult.filename || `media_${Date.now()}`;
       const extName = path.extname(baseFileName);
       const derivedExt = mime.extension(mimeType);
       const fileName =
@@ -52,15 +47,15 @@ export class MediaHandlerService {
         return null;
       }
 
-      if (!mediaProcessorService.validateFileSize(mediaBuffer.length)) {
-        logger.warn(`File too large: ${mediaBuffer.length} bytes`);
+      if (!mediaProcessorService.validateFileSize(mediaResult.buffer.length)) {
+        logger.warn(`File too large: ${mediaResult.buffer.length} bytes`);
         return null;
       }
 
       const sanitizedFileName = mediaProcessorService.sanitizeFileName(fileName);
 
       const filePath = await fileStorageService.saveFile(
-        mediaBuffer,
+        mediaResult.buffer,
         sanitizedFileName,
         mediaType,
         groupId
@@ -73,7 +68,7 @@ export class MediaHandlerService {
 
       if (mediaType === 'image') {
         try {
-          const metadata = await mediaProcessorService.processImage(mediaBuffer);
+          const metadata = await mediaProcessorService.processImage(mediaResult.buffer);
           width = metadata.width || null;
           height = metadata.height || null;
 
@@ -88,7 +83,7 @@ export class MediaHandlerService {
         }
       } else if (mediaType === 'video') {
         try {
-          const metadata = await mediaProcessorService.processVideo(mediaBuffer);
+          const metadata = await mediaProcessorService.processVideo(mediaResult.buffer);
           if (metadata.thumbnailBuffer) {
             thumbnailPath = await fileStorageService.saveThumbnail(
               metadata.thumbnailBuffer,
@@ -105,7 +100,7 @@ export class MediaHandlerService {
         group_id: groupId,
         file_name: sanitizedFileName,
         file_path: filePath,
-        file_size: BigInt(mediaBuffer.length),
+        file_size: BigInt(mediaResult.buffer.length),
         mime_type: mimeType,
         media_type: mediaType,
         thumbnail_path: thumbnailPath,
@@ -123,7 +118,7 @@ export class MediaHandlerService {
         id: savedMedia.id,
         fileName: sanitizedFileName,
         filePath,
-        fileSize: mediaBuffer.length,
+        fileSize: mediaResult.buffer.length,
         mimeType,
         mediaType,
         thumbnailPath,

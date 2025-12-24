@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { useSelector } from 'react-redux';
+import { RootState } from '../../store';
 import apiClient from '../../services/api/ApiClient';
 import webSocketService from '../../services/websocket/WebSocketService';
 import {
@@ -113,6 +115,9 @@ const typeConfig: Record<string, { icon: React.ReactNode; color: string; bg: str
 };
 
 const Messages: React.FC = () => {
+  const { user } = useSelector((state: RootState) => state.auth);
+  const isAdmin = user?.role === 'admin';
+
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [groups, setGroups] = useState<GroupRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -130,7 +135,7 @@ const Messages: React.FC = () => {
   const [expandedMessageIds, setExpandedMessageIds] = useState<Record<string, boolean>>({});
   
   // New State for UI Enhancements
-  const [viewMode, setViewMode] = useState<'list' | 'gallery'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'gallery'>(isAdmin ? 'list' : 'list');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const subscribedGroupIdsRef = useRef<Set<string>>(new Set());
@@ -139,19 +144,21 @@ const Messages: React.FC = () => {
     let isMounted = true;
     const loadData = async () => {
       try {
-        const [messagesResponse, groupsResponse] = await Promise.all([
-          apiClient.get<MessagesResponse>('/messages'),
-          apiClient.get<GroupsResponse>('/groups'),
-        ]);
+        const messagesResponse = await apiClient.get<MessagesResponse>('/messages');
         if (!messagesResponse.success) {
           throw new Error(messagesResponse.error || 'Failed to load messages');
         }
-        if (!groupsResponse.success) {
-          throw new Error(groupsResponse.error || 'Failed to load groups');
+        let groupData: GroupRow[] = [];
+        if (isAdmin) {
+          const groupsResponse = await apiClient.get<GroupsResponse>('/groups');
+          if (!groupsResponse.success) {
+            throw new Error(groupsResponse.error || 'Failed to load groups');
+          }
+          groupData = groupsResponse.data;
         }
         if (isMounted) {
           setMessages(messagesResponse.data);
-          setGroups(groupsResponse.data);
+          setGroups(groupData);
           setError(null);
         }
       } catch (err: any) {
@@ -169,7 +176,7 @@ const Messages: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     const monitoredGroupIds = groups
@@ -284,6 +291,9 @@ const Messages: React.FC = () => {
   };
 
   const downloadMediaFile = async (media: MediaRow) => {
+    if (!isAdmin) {
+      return;
+    }
     setDownloadLoadingByMedia((prev) => ({ ...prev, [media.id]: true }));
     try {
       const response = await apiClient.getBlob('/media/' + media.id + '/download');
@@ -305,6 +315,9 @@ const Messages: React.FC = () => {
   };
 
   const fetchMediaForMessage = async (messageId: string) => {
+    if (!isAdmin) {
+      return [];
+    }
     if (mediaCache[messageId]) {
       return mediaCache[messageId];
     }
@@ -326,6 +339,9 @@ const Messages: React.FC = () => {
   };
 
   const toggleAttachments = async (message: MessageRow) => {
+    if (!isAdmin) {
+      return;
+    }
     const isExpanded = Boolean(expandedMessageIds[message.id]);
     if (isExpanded) {
       setExpandedMessageIds((prev) => ({ ...prev, [message.id]: false }));
@@ -337,6 +353,9 @@ const Messages: React.FC = () => {
   };
 
   const openPreview = async (message: MessageRow) => {
+    if (!isAdmin) {
+      return;
+    }
     setPreviewMessage(message);
     setPreviewLoading(true);
     try {
@@ -401,30 +420,32 @@ const Messages: React.FC = () => {
           </div>
           
           {/* View Mode Toggle */}
-          <div className="bg-white p-1 rounded-xl border border-slate-200 shadow-sm flex items-center">
-             <button
-                onClick={() => setViewMode('list')}
-                className={`p-2 rounded-lg transition-all ${
-                  viewMode === 'list' 
-                    ? 'bg-violet-100 text-violet-700 shadow-sm' 
-                    : 'text-slate-400 hover:text-slate-600'
-                }`}
-                title="List View"
-             >
-               <List className="w-5 h-5" />
-             </button>
-             <button
-                onClick={() => setViewMode('gallery')}
-                className={`p-2 rounded-lg transition-all ${
-                  viewMode === 'gallery' 
-                    ? 'bg-violet-100 text-violet-700 shadow-sm' 
-                    : 'text-slate-400 hover:text-slate-600'
-                }`}
-                title="Gallery View"
-             >
-               <LayoutGrid className="w-5 h-5" />
-             </button>
-          </div>
+          {isAdmin && (
+            <div className="bg-white p-1 rounded-xl border border-slate-200 shadow-sm flex items-center">
+               <button
+                  onClick={() => setViewMode('list')}
+                  className={`p-2 rounded-lg transition-all ${
+                    viewMode === 'list' 
+                      ? 'bg-violet-100 text-violet-700 shadow-sm' 
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                  title="List View"
+               >
+                 <List className="w-5 h-5" />
+               </button>
+               <button
+                  onClick={() => setViewMode('gallery')}
+                  className={`p-2 rounded-lg transition-all ${
+                    viewMode === 'gallery' 
+                      ? 'bg-violet-100 text-violet-700 shadow-sm' 
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                  title="Gallery View"
+               >
+                 <LayoutGrid className="w-5 h-5" />
+               </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -432,33 +453,35 @@ const Messages: React.FC = () => {
       <div className="glass-panel rounded-[24px] p-5 animate-slide-up delay-100">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           {/* Group Pills */}
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className={`pill transition-all duration-300 ${
-                selectedGroupId === 'all'
-                  ? '!bg-violet-500 !text-white !border-violet-500'
-                  : 'hover:border-violet-300'
-              }`}
-              onClick={() => setSelectedGroupId('all')}
-            >
-              All groups
-            </button>
-            {groups.map((group) => (
+          {isAdmin && (
+            <div className="flex flex-wrap gap-2">
               <button
-                key={group.id}
                 type="button"
                 className={`pill transition-all duration-300 ${
-                  selectedGroupId === group.id
+                  selectedGroupId === 'all'
                     ? '!bg-violet-500 !text-white !border-violet-500'
                     : 'hover:border-violet-300'
                 }`}
-                onClick={() => setSelectedGroupId(group.id)}
+                onClick={() => setSelectedGroupId('all')}
               >
-                {group.name}
+                All groups
               </button>
-            ))}
-          </div>
+              {groups.map((group) => (
+                <button
+                  key={group.id}
+                  type="button"
+                  className={`pill transition-all duration-300 ${
+                    selectedGroupId === group.id
+                      ? '!bg-violet-500 !text-white !border-violet-500'
+                      : 'hover:border-violet-300'
+                  }`}
+                  onClick={() => setSelectedGroupId(group.id)}
+                >
+                  {group.name}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Search & Type Filter */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -601,7 +624,7 @@ const Messages: React.FC = () => {
                                 {message.sender_name || 'Unknown'}
                               </p>
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">
-                                {groupLookup[message.group_id]?.name || 'Unknown Group'}
+                                {groupLookup[message.group_id]?.name || (isAdmin ? 'Unknown Group' : 'Group')}
                               </span>
                             </div>
                             <div className="flex items-center gap-1.5">
@@ -659,7 +682,7 @@ const Messages: React.FC = () => {
                           </div>
                         )}
 
-                        {message.has_media && (
+                        {isAdmin && message.has_media && (
                           <div className="mt-2">
                             <button
                               type="button"
@@ -707,7 +730,7 @@ const Messages: React.FC = () => {
                       {/* Footer Actions */}
                       <div className="mt-3 pl-[44px] flex items-center justify-between border-t border-slate-100/50 pt-2">
                         <div className="flex items-center gap-2">
-                          {message.has_media && (
+                          {isAdmin && message.has_media && (
                             <button
                               type="button"
                               className="glass-button !py-1.5 !px-3 !text-xs bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100"

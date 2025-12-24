@@ -23,6 +23,22 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return <>{children}</>;
 };
 
+const RoleRoute: React.FC<{ roles: Array<'admin' | 'user'>; children: React.ReactNode }> = ({ roles, children }) => {
+  const { isAuthenticated, user } = useSelector((state: RootState) => state.auth);
+  const location = useLocation();
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (!user || !roles.includes(user.role)) {
+    const fallback = user?.role === 'user' ? '/messages' : '/';
+    return <Navigate to={fallback} replace />;
+  }
+
+  return <>{children}</>;
+};
+
 const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated } = useSelector((state: RootState) => state.auth);
   
@@ -55,7 +71,7 @@ const App: React.FC = () => {
 
         const response = await apiClient.get<{
           success: boolean;
-          data?: { id: string; username: string };
+          data?: { id: string; username: string; role: 'admin' | 'user' };
         }>('/auth/me');
 
         if (response.success && response.data && isMounted) {
@@ -63,6 +79,7 @@ const App: React.FC = () => {
             user: {
               id: response.data.id,
               username: response.data.username,
+              role: response.data.role,
             },
             accessToken: storedToken || null,
           }));
@@ -117,11 +134,46 @@ const App: React.FC = () => {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Dashboard />} />
-        <Route path="messages" element={<Messages />} />
-        <Route path="groups" element={<Groups />} />
-        <Route path="media" element={<MediaGallery />} />
-        <Route path="settings" element={<Settings />} />
+        <Route
+          index
+          element={
+            <RoleRoute roles={['admin']}>
+              <Dashboard />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="messages"
+          element={
+            <RoleRoute roles={['admin', 'user']}>
+              <Messages />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="groups"
+          element={
+            <RoleRoute roles={['admin']}>
+              <Groups />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="media"
+          element={
+            <RoleRoute roles={['admin']}>
+              <MediaGallery />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="settings"
+          element={
+            <RoleRoute roles={['admin']}>
+              <Settings />
+            </RoleRoute>
+          }
+        />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

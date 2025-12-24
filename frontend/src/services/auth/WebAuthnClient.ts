@@ -13,6 +13,7 @@ interface RegistrationResponse {
     user: {
       id: string;
       username: string;
+      role: 'admin' | 'user';
     };
   };
 }
@@ -25,6 +26,7 @@ interface LoginResponse {
     user: {
       id: string;
       username: string;
+      role: 'admin' | 'user';
     };
   };
 }

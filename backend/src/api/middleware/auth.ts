@@ -54,6 +54,7 @@ export function authMiddleware(
     req.user = {
       userId: payload.userId,
       username: payload.username,
+      role: payload.role,
     };
 
     next();

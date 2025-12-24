@@ -17,6 +17,7 @@ export class BotController {
           last_connected: dbStatus?.last_connected || null,
           last_disconnected: dbStatus?.last_disconnected || null,
           error_message: dbStatus?.error_message || null,
+          qr_code: dbStatus?.qr_code || null,
         },
       });
     } catch (error) {

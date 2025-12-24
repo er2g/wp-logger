@@ -7,8 +7,12 @@ import messageHandler from './services/whatsapp/MessageHandler';
 import mediaHandler from './services/whatsapp/MediaHandler';
 import groupManager from './services/whatsapp/GroupManager';
 import historySyncService from './services/whatsapp/HistorySyncService';
+import mediaRecoveryService from './services/whatsapp/MediaRecoveryService';
 import fileStorageService from './services/storage/FileStorage';
+import ocrQueueService from './services/ocr/OcrQueueService';
 import botRepository from './services/database/repositories/BotRepository';
+import messageRepository from './services/database/repositories/MessageRepository';
+import mediaRepository from './services/database/repositories/MediaRepository';
 import { testConnection } from './config/database';
 import logger from './utils/logger';
 
@@ -17,6 +21,7 @@ dotenv.config();
 class Application {
   private httpServer: http.Server | null = null;
   private currentQr: string | null = null;
+  private mediaRecoveryInterval: NodeJS.Timeout | null = null;
 
   async initialize(): Promise<void> {
     try {
@@ -30,16 +35,45 @@ class Application {
       await groupManager.initializeMonitoredGroups();
 
       await fileStorageService.initialize();
+      ocrQueueService.start();
 
       const app = expressServer.getApp();
       this.httpServer = http.createServer(app);
 
       websocketServer.initialize(this.httpServer);
 
-      websocketServer.onConnection((ws) => {
-        if (this.currentQr) {
-          ws.send(JSON.stringify({ type: 'bot:qr', data: { qr: this.currentQr } }));
+      websocketServer.onAuthenticated((ws) => {
+        if (ws.role !== 'admin') {
+          return;
         }
+
+        const sendSnapshot = async () => {
+          const status = await botRepository.getStatus();
+          if (status) {
+            ws.send(
+              JSON.stringify({
+                type: 'bot:status',
+                data: {
+                  isConnected: status.is_connected,
+                  error: status.error_message || undefined,
+                },
+              })
+            );
+
+            if (status.qr_code) {
+              ws.send(JSON.stringify({ type: 'bot:qr', data: { qr: status.qr_code } }));
+              return;
+            }
+          }
+
+          if (this.currentQr) {
+            ws.send(JSON.stringify({ type: 'bot:qr', data: { qr: this.currentQr } }));
+          }
+        };
+
+        sendSnapshot().catch((error) => {
+          logger.warn('Failed to send bot snapshot to admin:', error);
+        });
       });
 
       await whatsappService.initialize();
@@ -64,19 +98,21 @@ class Application {
       logger.info('QR Code received, broadcasting to clients');
       this.currentQr = qr;
       await botRepository.updateQr(qr);
-      websocketServer.broadcast('bot:qr', { qr });
+      websocketServer.broadcastToRoles(['admin'], 'bot:qr', { qr });
     });
 
     whatsappService.on('ready', async () => {
       logger.info('WhatsApp is ready, syncing groups');
       this.currentQr = null;
       await botRepository.updateStatus(true);
-      websocketServer.broadcast('bot:status', { isConnected: true });
+      websocketServer.broadcastToRoles(['admin'], 'bot:status', { isConnected: true });
+
+      this.scheduleMediaRecovery();
 
       try {
         const groups = await groupManager.syncGroups();
         logger.info('Synced ' + groups.length + ' groups');
-        websocketServer.broadcast('groups:synced', { groups });
+        websocketServer.broadcastToRoles(['admin'], 'groups:synced', { groups });
 
         const historySyncEnabled = process.env.HISTORY_SYNC_ON_START !== 'false';
         if (historySyncEnabled) {
@@ -93,19 +129,19 @@ class Application {
       logger.info('WhatsApp authenticated');
       this.currentQr = null;
       await botRepository.updateStatus(true);
-      websocketServer.broadcast('bot:status', { isConnected: true, authenticated: true });
+      websocketServer.broadcastToRoles(['admin'], 'bot:status', { isConnected: true, authenticated: true });
     });
 
     whatsappService.on('auth_failure', async (message) => {
       logger.error('WhatsApp auth failure:', message);
       await botRepository.updateStatus(false, message);
-      websocketServer.broadcast('bot:status', { isConnected: false, error: message });
+      websocketServer.broadcastToRoles(['admin'], 'bot:status', { isConnected: false, error: message });
     });
 
     whatsappService.on('disconnected', async (reason) => {
       logger.warn('WhatsApp disconnected:', reason);
       await botRepository.updateStatus(false, reason);
-      websocketServer.broadcast('bot:status', { isConnected: false, reason });
+      websocketServer.broadcastToRoles(['admin'], 'bot:status', { isConnected: false, reason });
     });
 
     whatsappService.on('message', async (message) => {
@@ -114,6 +150,28 @@ class Application {
 
     whatsappService.on('message_create', async (message) => {
       await this.handleIncomingMessage(message);
+    });
+  }
+
+  private scheduleMediaRecovery(): void {
+    if (this.mediaRecoveryInterval) {
+      return;
+    }
+
+    const intervalMinutes = parseInt(process.env.MEDIA_RECOVERY_INTERVAL_MINUTES || '10', 10);
+    if (intervalMinutes <= 0) {
+      return;
+    }
+
+    const intervalMs = intervalMinutes * 60 * 1000;
+    this.mediaRecoveryInterval = setInterval(() => {
+      mediaRecoveryService.recoverMissingMedia().catch((error) => {
+        logger.warn('Media recovery interval failed:', error);
+      });
+    }, intervalMs);
+
+    mediaRecoveryService.recoverMissingMedia().catch((error) => {
+      logger.warn('Media recovery initial run failed:', error);
     });
   }
 
@@ -142,19 +200,32 @@ class Application {
       logger.info('Processing message from group: ' + group.name + ' (' + group.id + ')');
 
       const processedMessage = await messageHandler.processMessage(message, group.id);
-      if (!processedMessage) {
-        return;
+      let messageId = processedMessage?.id || null;
+      if (!messageId) {
+        messageId =
+          (await messageRepository.findByWhatsappMessageId(message.id._serialized))?.id || null;
       }
 
-      if (message.hasMedia && processedMessage.id) {
+      if (message.hasMedia && messageId) {
         const processedMedia = await mediaHandler.processMediaMessage(
           message,
           group.id,
-          processedMessage.id
+          messageId
         );
         if (processedMedia) {
           websocketServer.broadcast('media:new', processedMedia, group.id);
+        } else {
+          const existingMedia = await mediaRepository.findByMessageId(messageId);
+          if (existingMedia.length === 0) {
+            mediaRecoveryService.recoverMissingMedia().catch((error) => {
+              logger.warn('Immediate media recovery failed:', error);
+            });
+          }
         }
+      }
+
+      if (!processedMessage) {
+        return;
       }
 
       websocketServer.broadcast('message:new', processedMessage, group.id);

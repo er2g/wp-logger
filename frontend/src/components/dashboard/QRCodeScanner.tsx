@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import webSocketService from '../../services/websocket/WebSocketService';
+import apiClient from '../../services/api/ApiClient';
 import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export const QRCodeScanner: React.FC = () => {
@@ -9,9 +10,50 @@ export const QRCodeScanner: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Initial status check could go here if we had a REST endpoint for it
-    // For now, we assume we are waiting for WS events
+    let isMounted = true;
     setStatus('waiting_for_qr');
+
+    const fetchStatus = async () => {
+      try {
+        const response = await apiClient.get<{
+          success: boolean;
+          data?: {
+            is_connected: boolean;
+            error_message?: string | null;
+            qr_code?: string | null;
+          };
+          error?: string;
+        }>('/bot/status');
+
+        if (!isMounted || !response.success || !response.data) {
+          return;
+        }
+
+        if (response.data.is_connected) {
+          setStatus('connected');
+          setQrCode(null);
+          setError(null);
+          return;
+        }
+
+        if (response.data.qr_code) {
+          setQrCode(response.data.qr_code);
+          setStatus('ready');
+          setError(null);
+          return;
+        }
+
+        if (response.data.error_message) {
+          setStatus('error');
+          setError(response.data.error_message);
+          return;
+        }
+      } catch {
+        // Ignore, rely on websocket events
+      }
+    };
+
+    fetchStatus();
 
     const handleQr = (data: { qr: string }) => {
       setQrCode(data.qr);
@@ -38,6 +80,7 @@ export const QRCodeScanner: React.FC = () => {
     webSocketService.on('bot:status', handleStatus);
 
     return () => {
+      isMounted = false;
       webSocketService.off('bot:qr', handleQr);
       webSocketService.off('bot:status', handleStatus);
     };

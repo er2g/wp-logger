@@ -12,26 +12,34 @@ export class StatsController {
       const { groupId, startDate, endDate } = req.query as StatsQuery;
 
       // Build date conditions
-      const conditions: string[] = [];
+      const conditions: string[] = ['g.is_monitored = true'];
       const params: any[] = [];
       let paramIndex = 1;
 
       if (groupId) {
-        conditions.push(`group_id = $${paramIndex++}`);
+        conditions.push(`m.group_id = $${paramIndex++}`);
         params.push(groupId);
       }
 
       if (startDate) {
-        conditions.push(`timestamp >= $${paramIndex++}`);
+        conditions.push(`m.timestamp >= $${paramIndex++}`);
         params.push(new Date(startDate));
       }
 
       if (endDate) {
-        conditions.push(`timestamp <= $${paramIndex++}`);
+        conditions.push(`m.timestamp <= $${paramIndex++}`);
         params.push(new Date(endDate));
       }
 
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+      const messageFrom = `FROM messages m JOIN groups g ON m.group_id = g.id ${whereClause}`;
+
+      const mediaParams: any[] = [];
+      let mediaWhere = 'WHERE g.is_monitored = true';
+      if (groupId) {
+        mediaWhere += ' AND m.group_id = $1';
+        mediaParams.push(groupId);
+      }
 
       // Parallel queries for performance
       const [
@@ -46,13 +54,14 @@ export class StatsController {
         storageStats,
       ] = await Promise.all([
         // Total messages
-        pool.query(`SELECT COUNT(*) FROM messages ${whereClause}`, params),
+        pool.query(`SELECT COUNT(*) ${messageFrom}`, params),
 
         // Total media
         pool.query(
           `SELECT COUNT(*) FROM media m
-           ${groupId ? 'WHERE m.group_id = $1' : ''}`,
-          groupId ? [groupId] : []
+           JOIN groups g ON m.group_id = g.id
+           ${mediaWhere}`,
+          mediaParams
         ),
 
         // Groups stats
@@ -60,7 +69,7 @@ export class StatsController {
 
         // Messages by type
         pool.query(
-          `SELECT message_type, COUNT(*) as count FROM messages ${whereClause} GROUP BY message_type`,
+          `SELECT m.message_type, COUNT(*) as count ${messageFrom} GROUP BY m.message_type`,
           params
         ),
 
@@ -68,16 +77,17 @@ export class StatsController {
         pool.query(
           `SELECT media_type, COUNT(*) as count, COALESCE(SUM(file_size), 0) as total_size
            FROM media m
-           ${groupId ? 'WHERE m.group_id = $1' : ''}
+           JOIN groups g ON m.group_id = g.id
+           ${mediaWhere}
            GROUP BY media_type`,
-          groupId ? [groupId] : []
+          mediaParams
         ),
 
         // Messages per day (last 30 days)
         pool.query(
-          `SELECT DATE(timestamp) as date, COUNT(*) as count
-           FROM messages ${whereClause}
-           GROUP BY DATE(timestamp)
+          `SELECT DATE(m.timestamp) as date, COUNT(*) as count
+           ${messageFrom}
+           GROUP BY DATE(m.timestamp)
            ORDER BY date DESC
            LIMIT 30`,
           params
@@ -85,8 +95,8 @@ export class StatsController {
 
         // Messages by hour of day
         pool.query(
-          `SELECT EXTRACT(HOUR FROM timestamp) as hour, COUNT(*) as count
-           FROM messages ${whereClause}
+          `SELECT EXTRACT(HOUR FROM m.timestamp) as hour, COUNT(*) as count
+           ${messageFrom}
            GROUP BY hour
            ORDER BY hour`,
           params
@@ -94,11 +104,11 @@ export class StatsController {
 
         // Top senders
         pool.query(
-          `SELECT sender_name, sender_number, COUNT(*) as message_count,
+          `SELECT m.sender_name, m.sender_number, COUNT(*) as message_count,
                   SUM(CASE WHEN has_media THEN 1 ELSE 0 END) as media_count,
-                  MAX(timestamp) as last_message_at
-           FROM messages ${whereClause}
-           GROUP BY sender_name, sender_number
+                  MAX(m.timestamp) as last_message_at
+           ${messageFrom}
+           GROUP BY m.sender_name, m.sender_number
            ORDER BY message_count DESC
            LIMIT 15`,
           params
@@ -118,15 +128,21 @@ export class StatsController {
 
       const [todayResult, weekResult, monthResult] = await Promise.all([
         pool.query(
-          `SELECT COUNT(*) FROM messages WHERE timestamp >= $1`,
+          `SELECT COUNT(*) FROM messages m
+           JOIN groups g ON m.group_id = g.id
+           WHERE g.is_monitored = true AND m.timestamp >= $1`,
           [today]
         ),
         pool.query(
-          `SELECT COUNT(*) FROM messages WHERE timestamp >= $1`,
+          `SELECT COUNT(*) FROM messages m
+           JOIN groups g ON m.group_id = g.id
+           WHERE g.is_monitored = true AND m.timestamp >= $1`,
           [weekAgo]
         ),
         pool.query(
-          `SELECT COUNT(*) FROM messages WHERE timestamp >= $1`,
+          `SELECT COUNT(*) FROM messages m
+           JOIN groups g ON m.group_id = g.id
+           WHERE g.is_monitored = true AND m.timestamp >= $1`,
           [monthAgo]
         ),
       ]);
@@ -200,7 +216,7 @@ export class StatsController {
       const { id } = req.params;
 
       const group = await groupRepository.findById(id);
-      if (!group) {
+      if (!group || !group.is_monitored) {
         res.status(404).json({
           success: false,
           error: 'Group not found',
@@ -217,26 +233,34 @@ export class StatsController {
         activityResult,
       ] = await Promise.all([
         messageRepository.getStats(id),
-        pool.query('SELECT COUNT(*) FROM media WHERE group_id = $1', [id]),
-        pool.query('SELECT COALESCE(SUM(file_size), 0) as total FROM media WHERE group_id = $1', [id]),
+        pool.query('SELECT COUNT(*) FROM media m JOIN groups g ON m.group_id = g.id WHERE m.group_id = $1 AND g.is_monitored = true', [id]),
+        pool.query('SELECT COALESCE(SUM(file_size), 0) as total FROM media m JOIN groups g ON m.group_id = g.id WHERE m.group_id = $1 AND g.is_monitored = true', [id]),
         pool.query(
-          `SELECT sender_name, sender_number, COUNT(*) as message_count,
+          `SELECT m.sender_name, m.sender_number, COUNT(*) as message_count,
                   SUM(CASE WHEN has_media THEN 1 ELSE 0 END) as media_count,
-                  MAX(timestamp) as last_message_at
-           FROM messages WHERE group_id = $1
-           GROUP BY sender_name, sender_number
+                  MAX(m.timestamp) as last_message_at
+           FROM messages m
+           JOIN groups g ON m.group_id = g.id
+           WHERE m.group_id = $1 AND g.is_monitored = true
+           GROUP BY m.sender_name, m.sender_number
            ORDER BY message_count DESC
            LIMIT 10`,
           [id]
         ),
         pool.query(
-          `SELECT message_type, COUNT(*) as count FROM messages WHERE group_id = $1 GROUP BY message_type`,
+          `SELECT m.message_type, COUNT(*) as count
+           FROM messages m
+           JOIN groups g ON m.group_id = g.id
+           WHERE m.group_id = $1 AND g.is_monitored = true
+           GROUP BY m.message_type`,
           [id]
         ),
         pool.query(
-          `SELECT DATE(timestamp) as date, COUNT(*) as count
-           FROM messages WHERE group_id = $1
-           GROUP BY DATE(timestamp)
+          `SELECT DATE(m.timestamp) as date, COUNT(*) as count
+           FROM messages m
+           JOIN groups g ON m.group_id = g.id
+           WHERE m.group_id = $1 AND g.is_monitored = true
+           GROUP BY DATE(m.timestamp)
            ORDER BY date DESC
            LIMIT 14`,
           [id]
@@ -288,22 +312,23 @@ export class StatsController {
       const numDays = Math.min(365, Math.max(1, parseInt(days, 10)));
 
       const params: any[] = [numDays];
-      let groupCondition = '';
+      let groupCondition = 'AND g.is_monitored = true';
       if (groupId) {
-        groupCondition = 'AND group_id = $2';
+        groupCondition = 'AND m.group_id = $2 AND g.is_monitored = true';
         params.push(groupId);
       }
 
       const result = await pool.query(
         `SELECT
-           DATE(timestamp) as date,
+           DATE(m.timestamp) as date,
            COUNT(*) as message_count,
            SUM(CASE WHEN has_media THEN 1 ELSE 0 END) as media_count,
            COUNT(DISTINCT sender_number) as unique_senders
-         FROM messages
-         WHERE timestamp >= CURRENT_DATE - INTERVAL '1 day' * $1
+         FROM messages m
+         JOIN groups g ON m.group_id = g.id
+         WHERE m.timestamp >= CURRENT_DATE - INTERVAL '1 day' * $1
          ${groupCondition}
-         GROUP BY DATE(timestamp)
+         GROUP BY DATE(m.timestamp)
          ORDER BY date ASC`,
         params
       );

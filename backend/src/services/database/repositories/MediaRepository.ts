@@ -5,7 +5,11 @@ import logger from '../../../utils/logger';
 export class MediaRepository {
   async findAll(): Promise<Media[]> {
     try {
-      const result = await pool.query<Media>('SELECT * FROM media');
+      const result = await pool.query<Media>(
+        `SELECT m.* FROM media m
+         JOIN groups g ON m.group_id = g.id
+         WHERE g.is_monitored = true`
+      );
       return result.rows;
     } catch (error) {
       logger.error('Failed to find all media:', error);
@@ -16,7 +20,9 @@ export class MediaRepository {
   async findById(id: string): Promise<Media | null> {
     try {
       const result = await pool.query<Media>(
-        'SELECT * FROM media WHERE id = $1',
+        `SELECT m.* FROM media m
+         JOIN groups g ON m.group_id = g.id
+         WHERE m.id = $1 AND g.is_monitored = true`,
         [id]
       );
       return result.rows[0] || null;
@@ -29,7 +35,9 @@ export class MediaRepository {
   async findByMessageId(messageId: string): Promise<Media[]> {
     try {
       const result = await pool.query<Media>(
-        'SELECT * FROM media WHERE message_id = $1',
+        `SELECT m.* FROM media m
+         JOIN groups g ON m.group_id = g.id
+         WHERE m.message_id = $1 AND g.is_monitored = true`,
         [messageId]
       );
       return result.rows;
@@ -42,7 +50,9 @@ export class MediaRepository {
   async findByGroupId(groupId: string): Promise<Media[]> {
     try {
       const result = await pool.query<Media>(
-        'SELECT * FROM media WHERE group_id = $1',
+        `SELECT m.* FROM media m
+         JOIN groups g ON m.group_id = g.id
+         WHERE m.group_id = $1 AND g.is_monitored = true`,
         [groupId]
       );
       return result.rows;

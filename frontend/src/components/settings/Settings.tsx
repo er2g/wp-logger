@@ -6,7 +6,8 @@ import {
   Settings as SettingsIcon, Wifi, WifiOff, RefreshCw, Shield, Clock,
   Server, Database, HardDrive, CheckCircle, AlertCircle, Info,
   Download, FileJson, FileText, FileSpreadsheet, Calendar, Filter,
-  Loader2, Package, Zap, Archive,
+  Loader2, Package, Zap, Archive, Users, UserPlus, Copy, Check,
+  FileSearch, PlayCircle, XCircle, ListChecks,
 } from 'lucide-react';
 
 interface BotStatusData {
@@ -29,6 +30,66 @@ interface GroupOption {
   name: string;
 }
 
+interface AdminUser {
+  id: string;
+  username: string;
+  role: 'admin' | 'user';
+  is_active: boolean;
+  created_at: string;
+  last_login: string | null;
+}
+
+interface AdminUsersResponse {
+  success: boolean;
+  data: AdminUser[];
+  error?: string;
+}
+
+interface OcrJob {
+  id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  mode: 'all' | 'missing' | 'failed';
+  total_items: number;
+  queued_items: number;
+  processing_items: number;
+  succeeded_items: number;
+  failed_items: number;
+  skipped_items: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  last_error: string | null;
+}
+
+interface OcrJobListResponse {
+  success: boolean;
+  data: OcrJob[];
+  error?: string;
+}
+
+interface OcrItem {
+  id: string;
+  media_id: string;
+  status: 'queued' | 'processing' | 'succeeded' | 'failed' | 'skipped';
+  attempts: number;
+  provider: string | null;
+  language: string | null;
+  error_message: string | null;
+  file_name: string | null;
+  media_type: string;
+  mime_type: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+interface OcrItemsResponse {
+  success: boolean;
+  data: OcrItem[];
+  error?: string;
+}
+
 const Settings: React.FC = () => {
   const { user } = useSelector((state: RootState) => state.auth);
   const [botStatus, setBotStatus] = useState<BotStatusData | null>(null);
@@ -44,6 +105,27 @@ const Settings: React.FC = () => {
   const [exportIncludeMedia, setExportIncludeMedia] = useState(false);
   const [groups, setGroups] = useState<GroupOption[]>([]);
   const [exportSuccess, setExportSuccess] = useState<string | null>(null);
+
+  // User management state
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [userFormUsername, setUserFormUsername] = useState('');
+  const [userFormPassword, setUserFormPassword] = useState('');
+  const [userFormRole, setUserFormRole] = useState<'admin' | 'user'>('user');
+  const [userIssueToken, setUserIssueToken] = useState(true);
+  const [issuedToken, setIssuedToken] = useState<string | null>(null);
+  const [issuedTokenUser, setIssuedTokenUser] = useState<string | null>(null);
+  const [copiedToken, setCopiedToken] = useState(false);
+  const [issuingTokenId, setIssuingTokenId] = useState<string | null>(null);
+
+  // OCR state
+  const [ocrJobs, setOcrJobs] = useState<OcrJob[]>([]);
+  const [ocrJobsLoading, setOcrJobsLoading] = useState(false);
+  const [ocrMode, setOcrMode] = useState<'all' | 'missing' | 'failed'>('missing');
+  const [selectedOcrJobId, setSelectedOcrJobId] = useState<string | null>(null);
+  const [ocrItems, setOcrItems] = useState<OcrItem[]>([]);
+  const [ocrItemsLoading, setOcrItemsLoading] = useState(false);
+  const [ocrItemStatus, setOcrItemStatus] = useState<string>('all');
 
   const loadBotStatus = async () => {
     setIsLoading(true);
@@ -73,10 +155,78 @@ const Settings: React.FC = () => {
     }
   };
 
+  const loadUsers = async () => {
+    setUsersLoading(true);
+    try {
+      const response = await apiClient.get<AdminUsersResponse>('/admin/users');
+      if (response.success) {
+        setUsers(response.data);
+      }
+    } catch {
+      // Ignore
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  const loadOcrJobs = async () => {
+    setOcrJobsLoading(true);
+    try {
+      const response = await apiClient.get<OcrJobListResponse>('/ocr/jobs');
+      if (response.success) {
+        setOcrJobs(response.data);
+        if (!selectedOcrJobId && response.data.length > 0) {
+          setSelectedOcrJobId(response.data[0].id);
+        }
+      }
+    } catch {
+      // Ignore
+    } finally {
+      setOcrJobsLoading(false);
+    }
+  };
+
+  const loadOcrItems = async (jobId: string, statusFilter: string) => {
+    setOcrItemsLoading(true);
+    try {
+      const params: any = {};
+      if (statusFilter !== 'all') {
+        params.status = statusFilter;
+      }
+      const response = await apiClient.get<OcrItemsResponse>(`/ocr/jobs/${jobId}/items`, params);
+      if (response.success) {
+        setOcrItems(response.data);
+      }
+    } catch {
+      // Ignore
+    } finally {
+      setOcrItemsLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadBotStatus();
     loadGroups();
+    loadUsers();
+    loadOcrJobs();
   }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadOcrJobs();
+      if (selectedOcrJobId) {
+        loadOcrItems(selectedOcrJobId, ocrItemStatus);
+      }
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [selectedOcrJobId, ocrItemStatus]);
+
+  useEffect(() => {
+    if (selectedOcrJobId) {
+      loadOcrItems(selectedOcrJobId, ocrItemStatus);
+    }
+  }, [selectedOcrJobId, ocrItemStatus]);
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'Never';
@@ -123,10 +273,151 @@ const Settings: React.FC = () => {
     }
   };
 
+  const handleCreateUser = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setIssuedToken(null);
+    setIssuedTokenUser(null);
+    setCopiedToken(false);
+    setError(null);
+
+    if (!userFormUsername.trim() || !userFormPassword.trim()) {
+      setError('Username and password are required');
+      return;
+    }
+
+    try {
+      const response = await apiClient.post<{
+        success: boolean;
+        data?: { user: AdminUser; accessToken?: string };
+        error?: string;
+      }>('/admin/users', {
+        username: userFormUsername.trim(),
+        password: userFormPassword,
+        role: userFormRole,
+        issueToken: userIssueToken,
+      });
+
+      if (!response.success) {
+        setError(response.error || 'Failed to create user');
+        return;
+      }
+
+      if (response.data?.user) {
+        setUsers((prev) => [response.data!.user, ...prev]);
+      }
+
+      if (response.data?.accessToken) {
+        setIssuedToken(response.data.accessToken);
+        setIssuedTokenUser(response.data.user.username);
+      }
+
+      setUserFormUsername('');
+      setUserFormPassword('');
+      setUserFormRole('user');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to create user');
+    }
+  };
+
+  const handleStartOcrJob = async () => {
+    setError(null);
+    try {
+      const response = await apiClient.post<{
+        success: boolean;
+        data?: { id: string; queued: number };
+        error?: string;
+      }>('/ocr/jobs', { mode: ocrMode });
+
+      if (!response.success || !response.data) {
+        setError(response.error || 'Failed to start OCR job');
+        return;
+      }
+
+      await loadOcrJobs();
+      setSelectedOcrJobId(response.data.id);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to start OCR job');
+    }
+  };
+
+  const handleCancelOcrJob = async (jobId: string) => {
+    setError(null);
+    try {
+      const response = await apiClient.post<{ success: boolean; error?: string }>(
+        `/ocr/jobs/${jobId}/cancel`
+      );
+      if (!response.success) {
+        setError(response.error || 'Failed to cancel OCR job');
+      }
+      await loadOcrJobs();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to cancel OCR job');
+    }
+  };
+
+  const handleRetryOcrJob = async (jobId: string) => {
+    setError(null);
+    try {
+      const response = await apiClient.post<{ success: boolean; error?: string }>(
+        `/ocr/jobs/${jobId}/retry-failed`
+      );
+      if (!response.success) {
+        setError(response.error || 'Failed to retry OCR job');
+      }
+      await loadOcrJobs();
+      await loadOcrItems(jobId, ocrItemStatus);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to retry OCR job');
+    }
+  };
+
+  const handleIssueToken = async (userId: string, username: string) => {
+    setIssuedToken(null);
+    setIssuedTokenUser(null);
+    setCopiedToken(false);
+    setError(null);
+    setIssuingTokenId(userId);
+
+    try {
+      const response = await apiClient.post<{
+        success: boolean;
+        data?: { accessToken: string };
+        error?: string;
+      }>(`/admin/users/${userId}/token`);
+
+      if (!response.success || !response.data?.accessToken) {
+        setError(response.error || 'Failed to issue token');
+        return;
+      }
+
+      setIssuedToken(response.data.accessToken);
+      setIssuedTokenUser(username);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to issue token');
+    } finally {
+      setIssuingTokenId(null);
+    }
+  };
+
+  const copyIssuedToken = async () => {
+    if (!issuedToken) return;
+    try {
+      await navigator.clipboard.writeText(issuedToken);
+      setCopiedToken(true);
+      setTimeout(() => setCopiedToken(false), 2000);
+    } catch {
+      // Ignore
+    }
+  };
+
+  const activeOcrJob = selectedOcrJobId
+    ? ocrJobs.find((job) => job.id === selectedOcrJobId) || null
+    : null;
+
   const systemInfo = [
     { label: 'API Endpoint', value: apiClient.getBaseUrl(), icon: Server },
     { label: 'Session User', value: user?.username || 'Unknown', icon: Shield },
-    { label: 'Session Type', value: 'Admin', icon: CheckCircle },
+    { label: 'Session Type', value: user?.role ? user.role.toUpperCase() : 'Unknown', icon: CheckCircle },
     { label: 'Phone Number', value: botStatus?.phone_number || '-', icon: Zap },
     { label: 'Device', value: botStatus?.device_name || '-', icon: Package },
   ];
@@ -390,7 +681,344 @@ const Settings: React.FC = () => {
         </div>
       </div>
 
+      {/* User Management */}
+      <div className="glass-panel rounded-[24px] p-6 animate-slide-up delay-250">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center">
+            <Users className="w-5 h-5 text-violet-600" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800">User Management</h3>
+            <p className="text-sm text-slate-500">Create users and issue access tokens</p>
+          </div>
+        </div>
+
+        <form className="grid gap-4 md:grid-cols-2" onSubmit={handleCreateUser}>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Username</label>
+            <input
+              type="text"
+              className="glass-input w-full"
+              value={userFormUsername}
+              onChange={(e) => setUserFormUsername(e.target.value)}
+              placeholder="username"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Password</label>
+            <input
+              type="password"
+              className="glass-input w-full"
+              value={userFormPassword}
+              onChange={(e) => setUserFormPassword(e.target.value)}
+              placeholder="Minimum 8 characters"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Role</label>
+            <select
+              className="glass-select w-full"
+              value={userFormRole}
+              onChange={(e) => setUserFormRole(e.target.value === 'admin' ? 'admin' : 'user')}
+            >
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-3 mt-8">
+            <input
+              id="issueToken"
+              type="checkbox"
+              checked={userIssueToken}
+              onChange={(e) => setUserIssueToken(e.target.checked)}
+              className="w-5 h-5 rounded-lg border-2 border-slate-300 text-violet-600 focus:ring-violet-500"
+            />
+            <label htmlFor="issueToken" className="text-sm text-slate-600">
+              Issue access token
+            </label>
+          </div>
+
+          <div className="md:col-span-2 flex justify-end">
+            <button
+              type="submit"
+              className="glass-button-solid !py-3 !px-6"
+              disabled={usersLoading}
+            >
+              <UserPlus className="w-4 h-4 mr-2" />
+              Create User
+            </button>
+          </div>
+        </form>
+
+        {issuedToken && (
+          <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-700 flex items-center justify-between gap-3">
+            <div className="break-all">
+              <span className="font-semibold mr-2">
+                Token{issuedTokenUser ? ` for ${issuedTokenUser}` : ''}:
+              </span>
+              {issuedToken}
+            </div>
+            <button
+              type="button"
+              className="glass-button !py-2 !px-3"
+              onClick={copyIssuedToken}
+            >
+              {copiedToken ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+            </button>
+          </div>
+        )}
+
+        <div className="mt-6">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-semibold text-slate-700">Existing Users</h4>
+            <button
+              type="button"
+              onClick={loadUsers}
+              className="glass-button !py-1.5"
+              disabled={usersLoading}
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${usersLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
+          {users.length === 0 && !usersLoading ? (
+            <p className="text-sm text-slate-500">No users found.</p>
+          ) : (
+            <div className="space-y-2">
+              {users.map((entry) => (
+                <div key={entry.id} className="glass-card !p-4 flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">{entry.username}</p>
+                    <p className="text-xs text-slate-500">
+                      Role: {entry.role.toUpperCase()} - {entry.is_active ? 'Active' : 'Inactive'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      className="glass-button !py-1.5 !px-3 !text-xs"
+                      onClick={() => handleIssueToken(entry.id, entry.username)}
+                      disabled={issuingTokenId === entry.id}
+                    >
+                      {issuingTokenId === entry.id ? 'Issuing...' : 'Issue token'}
+                    </button>
+                    <span className="text-xs text-slate-500">
+                      Last login: {entry.last_login ? new Date(entry.last_login).toLocaleString() : 'Never'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* System Information */}
+      <div className="glass-panel rounded-[24px] p-6 animate-slide-up delay-280">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
+            <FileSearch className="w-5 h-5 text-blue-600" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-slate-800">Document OCR</h3>
+            <p className="text-sm text-slate-500">Scan documents and images into structured text</p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Job Mode</label>
+            <select
+              className="glass-select w-full"
+              value={ocrMode}
+              onChange={(e) => setOcrMode(e.target.value as 'all' | 'missing' | 'failed')}
+            >
+              <option value="missing">Scan missing only</option>
+              <option value="failed">Retry failed</option>
+              <option value="all">Re-scan all</option>
+            </select>
+          </div>
+
+          <div className="flex items-end gap-3">
+            <button
+              type="button"
+              onClick={handleStartOcrJob}
+              className="glass-button-solid !py-3 !px-5"
+              disabled={ocrJobsLoading}
+            >
+              <PlayCircle className="w-4 h-4 mr-2" />
+              Start OCR Job
+            </button>
+            <button
+              type="button"
+              onClick={loadOcrJobs}
+              className="glass-button !py-3"
+              disabled={ocrJobsLoading}
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${ocrJobsLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div className="glass-card !p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-semibold text-slate-700">Recent Jobs</h4>
+              <span className="text-xs text-slate-400">{ocrJobs.length} total</span>
+            </div>
+
+            {ocrJobs.length === 0 ? (
+              <p className="text-sm text-slate-500">No OCR jobs yet.</p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {ocrJobs.map((job) => (
+                  <button
+                    key={job.id}
+                    type="button"
+                    onClick={() => setSelectedOcrJobId(job.id)}
+                    className={`w-full text-left rounded-xl border px-4 py-3 transition ${
+                      selectedOcrJobId === job.id
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-slate-200 hover:border-blue-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">
+                          {job.mode.toUpperCase()} · {job.status.toUpperCase()}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {new Date(job.created_at).toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="text-xs text-slate-500 text-right">
+                        <p>{job.succeeded_items}/{job.total_items} done</p>
+                        <p>Queued: {job.queued_items}</p>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="glass-card !p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-semibold text-slate-700">Selected Job</h4>
+              {activeOcrJob && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="glass-button !py-1.5 !px-3 !text-xs"
+                    onClick={() => handleRetryOcrJob(activeOcrJob.id)}
+                  >
+                    <ListChecks className="w-3.5 h-3.5 mr-1.5" />
+                    Retry Failed
+                  </button>
+                  <button
+                    type="button"
+                    className="glass-button !py-1.5 !px-3 !text-xs"
+                    onClick={() => handleCancelOcrJob(activeOcrJob.id)}
+                  >
+                    <XCircle className="w-3.5 h-3.5 mr-1.5" />
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {!activeOcrJob ? (
+              <p className="text-sm text-slate-500">Select a job to see details.</p>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span>Status: {activeOcrJob.status.toUpperCase()}</span>
+                  <span>Mode: {activeOcrJob.mode.toUpperCase()}</span>
+                </div>
+                <div className="grid gap-2 text-xs text-slate-600">
+                  <div className="flex justify-between">
+                    <span>Queued</span>
+                    <span>{activeOcrJob.queued_items}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Processing</span>
+                    <span>{activeOcrJob.processing_items}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Succeeded</span>
+                    <span>{activeOcrJob.succeeded_items}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Failed</span>
+                    <span>{activeOcrJob.failed_items}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Skipped</span>
+                    <span>{activeOcrJob.skipped_items}</span>
+                  </div>
+                </div>
+                {activeOcrJob.last_error && (
+                  <p className="text-xs text-rose-500 mt-2">{activeOcrJob.last_error}</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {activeOcrJob && (
+          <div className="mt-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <h4 className="text-sm font-semibold text-slate-700">Queue Items</h4>
+              <select
+                className="glass-select !py-2"
+                value={ocrItemStatus}
+                onChange={(e) => setOcrItemStatus(e.target.value)}
+              >
+                <option value="all">All statuses</option>
+                <option value="queued">Queued</option>
+                <option value="processing">Processing</option>
+                <option value="succeeded">Succeeded</option>
+                <option value="failed">Failed</option>
+                <option value="skipped">Skipped</option>
+              </select>
+            </div>
+
+            {ocrItemsLoading ? (
+              <p className="text-sm text-slate-400">Loading OCR items...</p>
+            ) : ocrItems.length === 0 ? (
+              <p className="text-sm text-slate-500">No items for this filter.</p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {ocrItems.map((item) => (
+                  <div key={item.id} className="glass-card !p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 truncate">
+                          {item.file_name || item.media_id}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {item.media_type.toUpperCase()} · {item.status.toUpperCase()} · Attempts: {item.attempts}
+                        </p>
+                      </div>
+                      <span className="text-xs text-slate-400">{item.provider || '-'}</span>
+                    </div>
+                    {item.error_message && (
+                      <p className="text-xs text-rose-500 mt-2">{item.error_message}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="glass-panel rounded-[24px] p-6 animate-slide-up delay-300">
         <div className="mb-6">
           <h3 className="text-lg font-semibold text-slate-800">System Information</h3>

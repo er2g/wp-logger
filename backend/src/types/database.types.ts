@@ -1,11 +1,15 @@
 export interface User {
   id: string;
   username: string;
+  role: UserRole;
+  password_hash: string | null;
   created_at: Date;
   updated_at: Date;
   last_login: Date | null;
   is_active: boolean;
 }
+
+export type UserRole = 'admin' | 'user';
 
 export interface WebAuthnCredential {
   id: string;
@@ -287,3 +291,41 @@ export interface Contact {
   last_seen: Date;
   message_count: number;
 }
+
+export interface OCRJob {
+  id: string;
+  status: OCRJobStatus;
+  mode: OCRJobMode;
+  requested_by: string | null;
+  total_items: number;
+  processed_items: number;
+  succeeded_items: number;
+  failed_items: number;
+  created_at: Date;
+  started_at: Date | null;
+  finished_at: Date | null;
+  last_error: string | null;
+}
+
+export type OCRJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type OCRJobMode = 'all' | 'missing' | 'failed';
+
+export interface OCRDocument {
+  id: string;
+  job_id: string | null;
+  media_id: string;
+  status: OCRDocumentStatus;
+  attempts: number;
+  next_attempt_at: Date | null;
+  provider: string | null;
+  language: string | null;
+  text: string | null;
+  result_json: Record<string, any> | null;
+  error_message: string | null;
+  created_at: Date;
+  updated_at: Date;
+  started_at: Date | null;
+  finished_at: Date | null;
+}
+
+export type OCRDocumentStatus = 'queued' | 'processing' | 'succeeded' | 'failed' | 'skipped';

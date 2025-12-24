@@ -2,9 +2,9 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import apiClient from '../../services/api/ApiClient';
 import {
-  Image, Video, Music, FileText, Sticker, Loader2, Search, Filter,
-  Grid, List, Download, X, ChevronLeft, ChevronRight, Play, Pause,
-  ZoomIn, ZoomOut, RotateCw, Calendar, HardDrive, Eye,
+  Image, Video, Music, FileText, Sticker, Loader2, Search,
+  Grid, List, Download, X, ChevronLeft, ChevronRight, Play,
+  ZoomIn, ZoomOut, HardDrive,
 } from 'lucide-react';
 
 interface MediaItem {

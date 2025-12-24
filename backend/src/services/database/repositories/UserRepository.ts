@@ -1,13 +1,15 @@
 import { pool } from '../../../config/database';
-import { User, WebAuthnCredential } from '../../../types/database.types';
+import { User, WebAuthnCredential, UserRole } from '../../../types/database.types';
 import logger from '../../../utils/logger';
 
 export class UserRepository {
-  async create(username: string): Promise<User> {
+  async create(username: string, options?: { role?: UserRole; passwordHash?: string | null }): Promise<User> {
     try {
+      const role = options?.role || 'user';
+      const passwordHash = options?.passwordHash || null;
       const result = await pool.query<User>(
-        'INSERT INTO users (username) VALUES ($1) RETURNING *',
-        [username]
+        'INSERT INTO users (username, role, password_hash) VALUES ($1, $2, $3) RETURNING *',
+        [username, role, passwordHash]
       );
       return result.rows[0];
     } catch (error) {
@@ -50,6 +52,52 @@ export class UserRepository {
       );
     } catch (error) {
       logger.error('Failed to update last login:', error);
+      throw error;
+    }
+  }
+
+  async updatePassword(userId: string, passwordHash: string | null): Promise<void> {
+    try {
+      await pool.query(
+        'UPDATE users SET password_hash = $1 WHERE id = $2',
+        [passwordHash, userId]
+      );
+    } catch (error) {
+      logger.error('Failed to update user password:', error);
+      throw error;
+    }
+  }
+
+  async updateRole(userId: string, role: UserRole): Promise<void> {
+    try {
+      await pool.query(
+        'UPDATE users SET role = $1 WHERE id = $2',
+        [role, userId]
+      );
+    } catch (error) {
+      logger.error('Failed to update user role:', error);
+      throw error;
+    }
+  }
+
+  async updateStatus(userId: string, isActive: boolean): Promise<void> {
+    try {
+      await pool.query(
+        'UPDATE users SET is_active = $1 WHERE id = $2',
+        [isActive, userId]
+      );
+    } catch (error) {
+      logger.error('Failed to update user status:', error);
+      throw error;
+    }
+  }
+
+  async list(): Promise<User[]> {
+    try {
+      const result = await pool.query<User>('SELECT * FROM users ORDER BY created_at DESC');
+      return result.rows;
+    } catch (error) {
+      logger.error('Failed to list users:', error);
       throw error;
     }
   }

@@ -5,6 +5,7 @@ export interface AuthRequest extends Request {
   user?: {
     userId: string;
     username: string;
+    role: 'admin' | 'user';
   };
 }
 
@@ -125,6 +126,7 @@ export interface WebAuthnLoginComplete {
 export interface JWTPayload {
   userId: string;
   username: string;
+  role: 'admin' | 'user';
   type: 'access' | 'refresh';
 }
 
@@ -134,6 +136,7 @@ export interface TokenResponse {
   user: {
     id: string;
     username: string;
+    role: 'admin' | 'user';
   };
 }
 

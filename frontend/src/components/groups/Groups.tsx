@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import apiClient from '../../services/api/ApiClient';
 import {
-  Users, Radio, Loader2, Eye, UserCheck, Circle, Search, Filter,
-  MessageSquare, Image, ChevronRight, Download, BarChart3, Clock,
-  MessageCircle, User, Tag,
+  Users, Radio, Loader2, Eye, Circle, Search,
+  MessageSquare, Image, Download,
+  MessageCircle, User,
 } from 'lucide-react';
 
 interface GroupRow {
@@ -43,16 +43,6 @@ interface GroupStatsResponse {
   data: GroupStats;
   error?: string;
 }
-
-const categoryColors: Record<string, { bg: string; text: string; border: string }> = {
-  personal: { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200' },
-  work: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200' },
-  family: { bg: 'bg-rose-100', text: 'text-rose-700', border: 'border-rose-200' },
-  friends: { bg: 'bg-emerald-100', text: 'text-emerald-700', border: 'border-emerald-200' },
-  business: { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-200' },
-  community: { bg: 'bg-cyan-100', text: 'text-cyan-700', border: 'border-cyan-200' },
-  other: { bg: 'bg-slate-100', text: 'text-slate-700', border: 'border-slate-200' },
-};
 
 const chatTypeLabels: Record<string, string> = {
   group: 'Group',
@@ -204,7 +194,6 @@ const Groups: React.FC = () => {
   };
 
   const monitoredCount = groups.filter((g) => g.is_monitored).length;
-  const totalParticipants = groups.reduce((sum, g) => sum + g.participant_count, 0);
   const dmCount = groups.filter((g) => g.chat_type === 'dm').length;
   const groupCount = groups.filter((g) => g.chat_type === 'group').length;
 

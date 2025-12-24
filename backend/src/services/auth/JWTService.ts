@@ -4,10 +4,11 @@ import { JWTPayload } from '../../types/api.types';
 import logger from '../../utils/logger';
 
 export class JWTService {
-  generateAccessToken(userId: string, username: string, expiresIn?: string): string {
+  generateAccessToken(userId: string, username: string, role: 'admin' | 'user', expiresIn?: string): string {
     const payload: JWTPayload = {
       userId,
       username,
+      role,
       type: 'access',
     };
 
@@ -18,10 +19,11 @@ export class JWTService {
     });
   }
 
-  generateRefreshToken(userId: string, username: string): string {
+  generateRefreshToken(userId: string, username: string, role: 'admin' | 'user'): string {
     const payload: JWTPayload = {
       userId,
       username,
+      role,
       type: 'refresh',
     };
 

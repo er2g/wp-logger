@@ -44,13 +44,17 @@ const MainLayout: React.FC = () => {
         : 'text-slate-600 hover:bg-white/60 hover:text-violet-700 hover:translate-x-1'
     }`;
 
-  const navItems = [
-    { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
-    { to: '/messages', icon: MessageSquare, label: 'Messages' },
-    { to: '/groups', icon: Users, label: 'Groups' },
-    { to: '/media', icon: Image, label: 'Media' },
-    { to: '/settings', icon: Settings, label: 'Settings' },
-  ];
+  const isAdmin = user?.role === 'admin';
+
+  const navItems = isAdmin
+    ? [
+        { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
+        { to: '/messages', icon: MessageSquare, label: 'Messages' },
+        { to: '/groups', icon: Users, label: 'Groups' },
+        { to: '/media', icon: Image, label: 'Media' },
+        { to: '/settings', icon: Settings, label: 'Settings' },
+      ]
+    : [{ to: '/messages', icon: MessageSquare, label: 'Messages' }];
 
   return (
     <div className="min-h-screen px-4 py-6 md:px-8 lg:px-12 animate-fade-in">

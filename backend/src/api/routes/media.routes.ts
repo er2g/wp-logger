@@ -2,10 +2,12 @@ import { Router } from 'express';
 import mediaController from '../controllers/MediaController';
 import { authMiddleware } from '../middleware/auth';
 import { mediaLimiter } from '../middleware/rateLimit';
+import { requireRole } from '../middleware/roles';
 
 const router = Router();
 
 router.use(authMiddleware);
+router.use(requireRole('admin'));
 
 router.get('/', mediaController.getAll);
 router.get('/:id', mediaController.getById);
