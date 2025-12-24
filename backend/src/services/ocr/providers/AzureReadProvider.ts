@@ -42,7 +42,7 @@ export class AzureReadProvider implements OCRProvider {
 
     const contentType = input.mimeType || 'application/octet-stream';
     const analyzeUrl = `${this.endpoint}/vision/${this.apiVersion}/read/analyze`;
-    const language = input.language || 'unk';
+    const language = input.language && input.language !== 'unk' ? input.language : undefined;
 
     const headers: Record<string, string> = {
       'Ocp-Apim-Subscription-Key': this.subscriptionKey,
@@ -52,11 +52,14 @@ export class AzureReadProvider implements OCRProvider {
       headers['Ocp-Apim-Subscription-Region'] = this.region;
     }
 
+    const params: Record<string, string> = {};
+    if (language) {
+      params.language = language;
+    }
+
     const response = await axios.post(analyzeUrl, input.buffer, {
       headers,
-      params: {
-        language,
-      },
+      params,
       maxContentLength: Infinity,
       maxBodyLength: Infinity,
     });
