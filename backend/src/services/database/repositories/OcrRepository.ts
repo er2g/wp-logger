@@ -9,6 +9,7 @@ export interface OCRJobWithCounts extends OCRJob {
 }
 
 export interface OCRDocumentWithMedia extends OCRDocument {
+  message_id: string | null;
   file_name: string | null;
   file_path: string | null;
   mime_type: string | null;
@@ -237,6 +238,7 @@ export class OcrRepository {
       params.push(limit, offset);
       const itemsResult = await pool.query<OCRDocumentWithMedia>(
         `SELECT d.*,
+                m.message_id,
                 m.file_name,
                 m.file_path,
                 m.mime_type,
@@ -266,6 +268,7 @@ export class OcrRepository {
     try {
       const result = await pool.query<OCRDocumentWithMedia>(
         `SELECT d.*,
+                m.message_id,
                 m.file_name,
                 m.file_path,
                 m.mime_type,
@@ -320,6 +323,7 @@ export class OcrRepository {
     try {
       const result = await pool.query<OCRDocumentWithMedia>(
         `SELECT d.*,
+                m.message_id,
                 m.file_name,
                 m.file_path,
                 m.mime_type,
@@ -356,6 +360,72 @@ export class OcrRepository {
       );
     } catch (error) {
       logger.error('Failed to mark OCR document succeeded:', error);
+      throw error;
+    }
+  }
+
+  async markDocumentsSucceededByMediaIds(
+    mediaIds: string[],
+    jobId: string | null,
+    provider: string,
+    language: string | null,
+    text: string,
+    resultJson: Record<string, any>
+  ): Promise<void> {
+    if (mediaIds.length === 0) {
+      return;
+    }
+    try {
+      await pool.query(
+        `UPDATE ocr_documents
+         SET status = 'succeeded',
+             provider = $2,
+             language = $3,
+             text = $4,
+             result_json = $5,
+             error_message = NULL,
+             finished_at = NOW(),
+             updated_at = NOW()
+         WHERE media_id = ANY($1::uuid[])
+           AND ($6::uuid IS NULL OR job_id = $6)`,
+        [mediaIds, provider, language, text, resultJson, jobId]
+      );
+    } catch (error) {
+      logger.error('Failed to mark OCR documents succeeded:', error);
+      throw error;
+    }
+  }
+
+  async getMediaBundleByMessageId(messageId: string): Promise<Array<{ id: string; file_path: string | null; file_name: string | null; mime_type: string | null; media_type: string }>> {
+    try {
+      const result = await pool.query(
+        `SELECT id, file_path, file_name, mime_type, media_type
+         FROM media
+         WHERE message_id = $1
+         ORDER BY created_at ASC`,
+        [messageId]
+      );
+      return result.rows;
+    } catch (error) {
+      logger.error('Failed to get media bundle:', error);
+      throw error;
+    }
+  }
+
+  async findSucceededDocumentByMessageId(messageId: string): Promise<OCRDocument | null> {
+    try {
+      const result = await pool.query<OCRDocument>(
+        `SELECT d.*
+         FROM ocr_documents d
+         JOIN media m ON m.id = d.media_id
+         WHERE m.message_id = $1 AND d.status = 'succeeded'
+         ORDER BY d.updated_at DESC
+         LIMIT 1`,
+        [messageId]
+      );
+      return result.rows[0] || null;
+    } catch (error) {
+      logger.error('Failed to find succeeded OCR document by message:', error);
       throw error;
     }
   }

@@ -1,4 +1,5 @@
 import fs from 'fs';
+import sharp from 'sharp';
 import ocrRepository from '../database/repositories/OcrRepository';
 import mediaRepository from '../database/repositories/MediaRepository';
 import groupRepository from '../database/repositories/GroupRepository';
@@ -119,6 +120,17 @@ export class OcrQueueService {
         await ocrRepository.markJobRunning(document.job_id);
       }
 
+      if (document.message_id) {
+        const existing = await ocrRepository.findSucceededDocumentByMessageId(document.message_id);
+        if (existing && existing.id !== document.id) {
+          await ocrRepository.markDocumentSkipped(document.id, 'Bundled by another OCR result');
+          if (document.job_id) {
+            await ocrRepository.refreshJobCounts(document.job_id);
+          }
+          return;
+        }
+      }
+
       if (!document.is_monitored) {
         await ocrRepository.markDocumentSkipped(document.id, 'Group no longer monitored');
         if (document.job_id) {
@@ -132,14 +144,13 @@ export class OcrQueueService {
         return;
       }
 
-      const exists = await fileStorageService.fileExists(document.file_path);
-      if (!exists) {
+      const bundle = await this.buildBundle(document);
+      if (!bundle) {
         await this.handleFailure(document, 'File not found on disk');
         return;
       }
 
-      const size = await fileStorageService.getFileSize(document.file_path);
-      if (size > this.maxFileSizeBytes) {
+      if (bundle.buffer.length > this.maxFileSizeBytes) {
         await ocrRepository.markDocumentSkipped(document.id, 'File exceeds OCR size limit');
         if (document.job_id) {
           await ocrRepository.refreshJobCounts(document.job_id);
@@ -147,21 +158,36 @@ export class OcrQueueService {
         return;
       }
 
-      const buffer = await fs.promises.readFile(document.file_path);
       const result = await ocrService.extractText({
-        buffer,
-        mimeType: document.mime_type,
-        fileName: document.file_name,
+        buffer: bundle.buffer,
+        mimeType: bundle.mimeType || document.mime_type,
+        fileName: bundle.fileName || document.file_name,
         language: this.language,
       });
 
-      await ocrRepository.markDocumentSucceeded(
-        document.id,
-        result.provider,
-        result.language || null,
-        result.text,
-        result.json
-      );
+      const bundleResult = {
+        ...result.json,
+        bundled_media_ids: bundle.mediaIds,
+      };
+
+      if (bundle.mediaIds.length > 1) {
+        await ocrRepository.markDocumentsSucceededByMediaIds(
+          bundle.mediaIds,
+          document.job_id,
+          result.provider,
+          result.language || null,
+          result.text,
+          bundleResult
+        );
+      } else {
+        await ocrRepository.markDocumentSucceeded(
+          document.id,
+          result.provider,
+          result.language || null,
+          result.text,
+          bundleResult
+        );
+      }
 
       if (document.job_id) {
         await ocrRepository.refreshJobCounts(document.job_id);
@@ -187,6 +213,104 @@ export class OcrQueueService {
       await ocrRepository.refreshJobCounts(document.job_id);
       this.broadcastJobUpdate(document.job_id);
     }
+  }
+
+  private async buildBundle(document: { media_id: string; message_id: string | null; media_type: string; file_path: string | null; file_name: string | null; mime_type: string | null }): Promise<{ buffer: Buffer; mimeType: string | null; fileName: string | null; mediaIds: string[] } | null> {
+    const primaryPath = document.file_path;
+    if (!primaryPath) {
+      return null;
+    }
+
+    const primaryExists = await fileStorageService.fileExists(primaryPath);
+    if (!primaryExists) {
+      return null;
+    }
+
+    if (!document.message_id || (document.media_type !== 'image' && document.media_type !== 'sticker')) {
+      const buffer = await fs.promises.readFile(primaryPath);
+      return {
+        buffer,
+        mimeType: document.mime_type,
+        fileName: document.file_name,
+        mediaIds: [document.media_id],
+      };
+    }
+
+    const bundle = await ocrRepository.getMediaBundleByMessageId(document.message_id);
+    const imageBundle = bundle.filter((item) => item.media_type === 'image' || item.media_type === 'sticker');
+
+    if (imageBundle.length <= 1) {
+      const buffer = await fs.promises.readFile(primaryPath);
+      return {
+        buffer,
+        mimeType: document.mime_type,
+        fileName: document.file_name,
+        mediaIds: [document.media_id],
+      };
+    }
+
+    const buffers = [];
+    const sizes = [];
+    for (const item of imageBundle) {
+      if (!item.file_path) {
+        continue;
+      }
+      const exists = await fileStorageService.fileExists(item.file_path);
+      if (!exists) {
+        continue;
+      }
+      const fileBuffer = await fs.promises.readFile(item.file_path);
+      const metadata = await sharp(fileBuffer).metadata();
+      if (!metadata.width || !metadata.height) {
+        continue;
+      }
+      buffers.push(fileBuffer);
+      sizes.push({ width: metadata.width, height: metadata.height });
+    }
+
+    if (buffers.length <= 1) {
+      const buffer = await fs.promises.readFile(primaryPath);
+      return {
+        buffer,
+        mimeType: document.mime_type,
+        fileName: document.file_name,
+        mediaIds: [document.media_id],
+      };
+    }
+
+    const maxWidth = Math.max(...sizes.map((size) => size.width));
+    const resized = await Promise.all(
+      buffers.map((buffer) => sharp(buffer).resize({ width: maxWidth }).png().toBuffer({ resolveWithObject: true }))
+    );
+
+    const totalHeight = resized.reduce((sum, entry) => sum + entry.info.height, 0);
+    const composite = [];
+    let offsetY = 0;
+    for (const entry of resized) {
+      composite.push({ input: entry.data, top: offsetY, left: 0 });
+      offsetY += entry.info.height;
+    }
+
+    const merged = await sharp({
+      create: {
+        width: maxWidth,
+        height: totalHeight,
+        channels: 3,
+        background: 'white',
+      },
+    })
+      .composite(composite)
+      .png()
+      .toBuffer();
+
+    const bundleIds = imageBundle.map((item) => item.id);
+
+    return {
+      buffer: merged,
+      mimeType: 'image/png',
+      fileName: `bundle-${document.message_id}.png`,
+      mediaIds: bundleIds,
+    };
   }
 
   private async broadcastJobUpdate(jobId: string): Promise<void> {
