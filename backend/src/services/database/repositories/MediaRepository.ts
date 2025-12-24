@@ -2,6 +2,20 @@ import { pool } from '../../../config/database';
 import { Media } from '../../../types/database.types';
 import logger from '../../../utils/logger';
 
+export interface MediaWithOcrInfo extends Media {
+  group_name: string;
+  has_ocr: boolean;
+  ocr_status: string | null;
+}
+
+export interface MediaFilter {
+  groupId?: string;
+  mediaType?: string;
+  ocrEligible?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
 export class MediaRepository {
   async findAll(): Promise<Media[]> {
     try {
@@ -13,6 +27,61 @@ export class MediaRepository {
       return result.rows;
     } catch (error) {
       logger.error('Failed to find all media:', error);
+      throw error;
+    }
+  }
+
+  async findWithOcrInfo(filter: MediaFilter = {}): Promise<{ items: MediaWithOcrInfo[]; total: number }> {
+    try {
+      const conditions: string[] = ['g.is_monitored = true'];
+      const params: any[] = [];
+      let paramIndex = 1;
+
+      if (filter.groupId) {
+        conditions.push(`m.group_id = $${paramIndex++}`);
+        params.push(filter.groupId);
+      }
+
+      if (filter.mediaType) {
+        conditions.push(`m.media_type = $${paramIndex++}`);
+        params.push(filter.mediaType);
+      }
+
+      if (filter.ocrEligible) {
+        conditions.push(`m.media_type IN ('image', 'document', 'sticker')`);
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      const countResult = await pool.query<{ count: string }>(
+        `SELECT COUNT(*) as count FROM media m
+         JOIN groups g ON m.group_id = g.id
+         ${whereClause}`,
+        params
+      );
+      const total = parseInt(countResult.rows[0]?.count || '0', 10);
+
+      const limit = filter.limit || 100;
+      const offset = filter.offset || 0;
+
+      const result = await pool.query<MediaWithOcrInfo>(
+        `SELECT
+          m.*,
+          g.name as group_name,
+          CASE WHEN od.id IS NOT NULL THEN true ELSE false END as has_ocr,
+          od.status as ocr_status
+         FROM media m
+         JOIN groups g ON m.group_id = g.id
+         LEFT JOIN ocr_documents od ON m.id = od.media_id
+         ${whereClause}
+         ORDER BY m.created_at DESC
+         LIMIT $${paramIndex++} OFFSET $${paramIndex++}`,
+        [...params, limit, offset]
+      );
+
+      return { items: result.rows, total };
+    } catch (error) {
+      logger.error('Failed to find media with OCR info:', error);
       throw error;
     }
   }

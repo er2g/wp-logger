@@ -11,21 +11,40 @@ import * as mime from 'mime-types';
 export class MediaController {
   async getAll(req: AuthRequest, res: Response): Promise<void> {
     try {
-      // TODO: Implement proper filtering and pagination in repository
-      const { groupId, messageId } = req.query as any;
+      const { groupId, messageId, mediaType, ocrEligible, limit, page } = req.query as any;
 
-      let media;
-      if (groupId) {
-        media = await mediaRepository.findByGroupId(groupId);
-      } else if (messageId) {
-        media = await mediaRepository.findByMessageId(messageId);
-      } else {
-        media = await mediaRepository.findAll();
+      // If messageId is specified, use the simple query
+      if (messageId) {
+        const media = await mediaRepository.findByMessageId(messageId);
+        res.json({
+          success: true,
+          data: media,
+        });
+        return;
       }
+
+      // Use the new findWithOcrInfo for richer data
+      const parsedLimit = Math.min(200, Math.max(1, parseInt(limit || '100', 10)));
+      const parsedPage = Math.max(1, parseInt(page || '1', 10));
+      const offset = (parsedPage - 1) * parsedLimit;
+
+      const result = await mediaRepository.findWithOcrInfo({
+        groupId,
+        mediaType,
+        ocrEligible: ocrEligible === 'true',
+        limit: parsedLimit,
+        offset,
+      });
 
       res.json({
         success: true,
-        data: media,
+        data: result.items,
+        pagination: {
+          page: parsedPage,
+          limit: parsedLimit,
+          total: result.total,
+          pages: Math.ceil(result.total / parsedLimit),
+        },
       });
     } catch (error) {
       logger.error('Get all media failed:', error);

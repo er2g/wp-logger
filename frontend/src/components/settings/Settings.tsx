@@ -7,7 +7,8 @@ import {
   Server, Database, HardDrive, CheckCircle, AlertCircle, Info,
   Download, FileJson, FileText, FileSpreadsheet, Calendar, Filter,
   Loader2, Package, Zap, Archive, Users, UserPlus, Copy, Check,
-  FileSearch, PlayCircle, XCircle, ListChecks,
+  FileSearch, PlayCircle, XCircle, ListChecks, Sliders, Image,
+  ToggleLeft, ToggleRight, CheckSquare, Square, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 interface BotStatusData {
@@ -84,6 +85,48 @@ interface OcrItem {
   finished_at: string | null;
 }
 
+interface OcrSettings {
+  enabled: boolean;
+  provider: string;
+  fallbackProvider: string;
+  language: string;
+  concurrency: number;
+  pollIntervalMs: number;
+  maxAttempts: number;
+  maxFileSizeMb: number;
+}
+
+interface OcrSettingsResponse {
+  success: boolean;
+  data: OcrSettings;
+  error?: string;
+}
+
+interface OcrMediaItem {
+  id: string;
+  file_name: string | null;
+  file_path: string | null;
+  media_type: string;
+  mime_type: string | null;
+  group_id: string;
+  group_name: string;
+  created_at: string;
+  has_ocr: boolean;
+  ocr_status: string | null;
+}
+
+interface OcrMediaListResponse {
+  success: boolean;
+  data: OcrMediaItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+  error?: string;
+}
+
 interface OcrItemsResponse {
   success: boolean;
   data: OcrItem[];
@@ -126,6 +169,20 @@ const Settings: React.FC = () => {
   const [ocrItems, setOcrItems] = useState<OcrItem[]>([]);
   const [ocrItemsLoading, setOcrItemsLoading] = useState(false);
   const [ocrItemStatus, setOcrItemStatus] = useState<string>('all');
+
+  // OCR Settings state
+  const [ocrSettings, setOcrSettings] = useState<OcrSettings | null>(null);
+  const [ocrSettingsLoading, setOcrSettingsLoading] = useState(false);
+  const [ocrSettingsSaving, setOcrSettingsSaving] = useState(false);
+  const [showOcrSettings, setShowOcrSettings] = useState(false);
+
+  // OCR Media selection state
+  const [ocrMediaList, setOcrMediaList] = useState<OcrMediaItem[]>([]);
+  const [ocrMediaLoading, setOcrMediaLoading] = useState(false);
+  const [selectedMediaIds, setSelectedMediaIds] = useState<Set<string>>(new Set());
+  const [ocrMediaGroup, setOcrMediaGroup] = useState<string>('all');
+  const [ocrMediaType, setOcrMediaType] = useState<string>('all');
+  const [showMediaSelector, setShowMediaSelector] = useState(false);
 
   const loadBotStatus = async () => {
     setIsLoading(true);
@@ -186,6 +243,109 @@ const Settings: React.FC = () => {
     }
   };
 
+  const loadOcrSettings = async () => {
+    setOcrSettingsLoading(true);
+    try {
+      const response = await apiClient.get<OcrSettingsResponse>('/ocr/settings');
+      if (response.success) {
+        setOcrSettings(response.data);
+      }
+    } catch {
+      // Ignore
+    } finally {
+      setOcrSettingsLoading(false);
+    }
+  };
+
+  const saveOcrSettings = async (updates: Partial<OcrSettings>) => {
+    setOcrSettingsSaving(true);
+    setError(null);
+    try {
+      const response = await apiClient.patch<OcrSettingsResponse>('/ocr/settings', updates);
+      if (response.success) {
+        setOcrSettings(response.data);
+      } else {
+        setError(response.error || 'Failed to update OCR settings');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to update OCR settings');
+    } finally {
+      setOcrSettingsSaving(false);
+    }
+  };
+
+  const loadOcrMedia = async () => {
+    setOcrMediaLoading(true);
+    try {
+      const params: any = { limit: 100, ocrEligible: true };
+      if (ocrMediaGroup !== 'all') {
+        params.groupId = ocrMediaGroup;
+      }
+      if (ocrMediaType !== 'all') {
+        params.mediaType = ocrMediaType;
+      }
+      const response = await apiClient.get<OcrMediaListResponse>('/media', params);
+      if (response.success) {
+        setOcrMediaList(response.data);
+      }
+    } catch {
+      // Ignore
+    } finally {
+      setOcrMediaLoading(false);
+    }
+  };
+
+  const handleOcrFromSelected = async () => {
+    if (selectedMediaIds.size === 0) {
+      setError('No media selected');
+      return;
+    }
+
+    setError(null);
+    try {
+      const response = await apiClient.post<{
+        success: boolean;
+        data?: { id: string; queued: number };
+        error?: string;
+      }>('/ocr/jobs/from-media', {
+        mediaIds: Array.from(selectedMediaIds),
+        mode: 'all',
+      });
+
+      if (!response.success || !response.data) {
+        setError(response.error || 'Failed to start OCR job');
+        return;
+      }
+
+      setSelectedMediaIds(new Set());
+      setShowMediaSelector(false);
+      await loadOcrJobs();
+      setSelectedOcrJobId(response.data.id);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to start OCR job');
+    }
+  };
+
+  const toggleMediaSelection = (mediaId: string) => {
+    setSelectedMediaIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(mediaId)) {
+        next.delete(mediaId);
+      } else {
+        next.add(mediaId);
+      }
+      return next;
+    });
+  };
+
+  const selectAllMedia = () => {
+    setSelectedMediaIds(new Set(ocrMediaList.map((item) => item.id)));
+  };
+
+  const deselectAllMedia = () => {
+    setSelectedMediaIds(new Set());
+  };
+
   const loadOcrItems = async (jobId: string, statusFilter: string) => {
     setOcrItemsLoading(true);
     try {
@@ -209,7 +369,14 @@ const Settings: React.FC = () => {
     loadGroups();
     loadUsers();
     loadOcrJobs();
+    loadOcrSettings();
   }, []);
+
+  useEffect(() => {
+    if (showMediaSelector) {
+      loadOcrMedia();
+    }
+  }, [showMediaSelector, ocrMediaGroup, ocrMediaType]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -818,17 +985,323 @@ const Settings: React.FC = () => {
         </div>
       </div>
 
-      {/* System Information */}
+      {/* Document OCR */}
       <div className="glass-panel rounded-[24px] p-6 animate-slide-up delay-280">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-            <FileSearch className="w-5 h-5 text-blue-600" />
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
+              <FileSearch className="w-5 h-5 text-blue-600" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-slate-800">Document OCR</h3>
+              <p className="text-sm text-slate-500">Scan documents and images into structured text</p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-lg font-semibold text-slate-800">Document OCR</h3>
-            <p className="text-sm text-slate-500">Scan documents and images into structured text</p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setShowOcrSettings(!showOcrSettings)}
+              className={`glass-button !py-2 ${showOcrSettings ? '!bg-blue-100 !border-blue-300' : ''}`}
+            >
+              <Sliders className="w-4 h-4 mr-2" />
+              Settings
+              {showOcrSettings ? <ChevronUp className="w-4 h-4 ml-1" /> : <ChevronDown className="w-4 h-4 ml-1" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowMediaSelector(!showMediaSelector)}
+              className={`glass-button !py-2 ${showMediaSelector ? '!bg-blue-100 !border-blue-300' : ''}`}
+            >
+              <Image className="w-4 h-4 mr-2" />
+              Select Media
+              {showMediaSelector ? <ChevronUp className="w-4 h-4 ml-1" /> : <ChevronDown className="w-4 h-4 ml-1" />}
+            </button>
           </div>
         </div>
+
+        {/* OCR Settings Panel */}
+        {showOcrSettings && ocrSettingsLoading && (
+          <div className="mb-6 p-4 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center">
+            <Loader2 className="w-5 h-5 animate-spin text-slate-400 mr-2" />
+            <span className="text-sm text-slate-500">Loading OCR settings...</span>
+          </div>
+        )}
+        {showOcrSettings && !ocrSettingsLoading && ocrSettings && (
+          <div className="mb-6 p-4 rounded-xl bg-slate-50 border border-slate-200">
+            <h4 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
+              <Sliders className="w-4 h-4" />
+              Performance Settings
+            </h4>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              {/* Enabled Toggle */}
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-2">OCR Enabled</label>
+                <button
+                  type="button"
+                  onClick={() => saveOcrSettings({ enabled: !ocrSettings.enabled })}
+                  disabled={ocrSettingsSaving}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition ${
+                    ocrSettings.enabled
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                      : 'bg-slate-100 border-slate-300 text-slate-600'
+                  }`}
+                >
+                  {ocrSettings.enabled ? (
+                    <ToggleRight className="w-5 h-5" />
+                  ) : (
+                    <ToggleLeft className="w-5 h-5" />
+                  )}
+                  {ocrSettings.enabled ? 'Enabled' : 'Disabled'}
+                </button>
+              </div>
+
+              {/* Concurrency */}
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-2">
+                  Concurrency: {ocrSettings.concurrency}
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="10"
+                  value={ocrSettings.concurrency}
+                  onChange={(e) => saveOcrSettings({ concurrency: parseInt(e.target.value) })}
+                  disabled={ocrSettingsSaving}
+                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                />
+                <div className="flex justify-between text-xs text-slate-400 mt-1">
+                  <span>1</span>
+                  <span>10</span>
+                </div>
+              </div>
+
+              {/* Poll Interval */}
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-2">
+                  Poll Interval: {ocrSettings.pollIntervalMs / 1000}s
+                </label>
+                <input
+                  type="range"
+                  min="1000"
+                  max="30000"
+                  step="1000"
+                  value={ocrSettings.pollIntervalMs}
+                  onChange={(e) => saveOcrSettings({ pollIntervalMs: parseInt(e.target.value) })}
+                  disabled={ocrSettingsSaving}
+                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                />
+                <div className="flex justify-between text-xs text-slate-400 mt-1">
+                  <span>1s</span>
+                  <span>30s</span>
+                </div>
+              </div>
+
+              {/* Max File Size */}
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-2">
+                  Max File Size: {ocrSettings.maxFileSizeMb}MB
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="100"
+                  value={ocrSettings.maxFileSizeMb}
+                  onChange={(e) => saveOcrSettings({ maxFileSizeMb: parseInt(e.target.value) })}
+                  disabled={ocrSettingsSaving}
+                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                />
+                <div className="flex justify-between text-xs text-slate-400 mt-1">
+                  <span>1MB</span>
+                  <span>100MB</span>
+                </div>
+              </div>
+
+              {/* Max Attempts */}
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-2">
+                  Max Attempts: {ocrSettings.maxAttempts}
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="10"
+                  value={ocrSettings.maxAttempts}
+                  onChange={(e) => saveOcrSettings({ maxAttempts: parseInt(e.target.value) })}
+                  disabled={ocrSettingsSaving}
+                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                />
+                <div className="flex justify-between text-xs text-slate-400 mt-1">
+                  <span>1</span>
+                  <span>10</span>
+                </div>
+              </div>
+
+              {/* Language */}
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-2">Language</label>
+                <select
+                  className="glass-select w-full !py-2"
+                  value={ocrSettings.language}
+                  onChange={(e) => saveOcrSettings({ language: e.target.value })}
+                  disabled={ocrSettingsSaving}
+                >
+                  <option value="unk">Auto-detect</option>
+                  <option value="en">English</option>
+                  <option value="tr">Turkish</option>
+                  <option value="de">German</option>
+                  <option value="fr">French</option>
+                  <option value="es">Spanish</option>
+                  <option value="ar">Arabic</option>
+                </select>
+              </div>
+
+              {/* Provider Info */}
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-slate-600 mb-2">Provider</label>
+                <div className="flex items-center gap-3 text-sm text-slate-700">
+                  <span className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg font-medium">
+                    {ocrSettings.provider.toUpperCase()}
+                  </span>
+                  {ocrSettings.fallbackProvider && (
+                    <>
+                      <span className="text-slate-400">fallback:</span>
+                      <span className="px-3 py-1.5 bg-slate-200 text-slate-600 rounded-lg">
+                        {ocrSettings.fallbackProvider.toUpperCase()}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+            {ocrSettingsSaving && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-blue-600">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Saving...
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Media Selector Panel */}
+        {showMediaSelector && (
+          <div className="mb-6 p-4 rounded-xl bg-slate-50 border border-slate-200">
+            <h4 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
+              <Image className="w-4 h-4" />
+              Select Media for OCR
+            </h4>
+
+            <div className="flex flex-wrap items-center gap-3 mb-4">
+              <select
+                className="glass-select !py-2"
+                value={ocrMediaGroup}
+                onChange={(e) => setOcrMediaGroup(e.target.value)}
+              >
+                <option value="all">All groups</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </select>
+
+              <select
+                className="glass-select !py-2"
+                value={ocrMediaType}
+                onChange={(e) => setOcrMediaType(e.target.value)}
+              >
+                <option value="all">All types</option>
+                <option value="image">Images</option>
+                <option value="document">Documents</option>
+                <option value="sticker">Stickers</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={loadOcrMedia}
+                className="glass-button !py-2"
+                disabled={ocrMediaLoading}
+              >
+                <RefreshCw className={`w-4 h-4 mr-2 ${ocrMediaLoading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+
+              <div className="flex gap-2 ml-auto">
+                <button
+                  type="button"
+                  onClick={selectAllMedia}
+                  className="glass-button !py-2 !text-xs"
+                >
+                  Select All
+                </button>
+                <button
+                  type="button"
+                  onClick={deselectAllMedia}
+                  className="glass-button !py-2 !text-xs"
+                >
+                  Deselect All
+                </button>
+              </div>
+            </div>
+
+            {ocrMediaLoading ? (
+              <div className="flex items-center gap-2 text-sm text-slate-500 py-4">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Loading media...
+              </div>
+            ) : ocrMediaList.length === 0 ? (
+              <p className="text-sm text-slate-500 py-4">No eligible media found.</p>
+            ) : (
+              <>
+                <div className="grid gap-2 max-h-64 overflow-y-auto">
+                  {ocrMediaList.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => toggleMediaSelection(item.id)}
+                      className={`w-full text-left flex items-center gap-3 p-3 rounded-lg border transition ${
+                        selectedMediaIds.has(item.id)
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-slate-200 hover:border-blue-300 bg-white'
+                      }`}
+                    >
+                      {selectedMediaIds.has(item.id) ? (
+                        <CheckSquare className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                      ) : (
+                        <Square className="w-5 h-5 text-slate-400 flex-shrink-0" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-slate-800 truncate">
+                          {item.file_name || item.id}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {item.media_type.toUpperCase()} · {item.group_name}
+                          {item.has_ocr && (
+                            <span className={`ml-2 ${item.ocr_status === 'succeeded' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                              OCR: {item.ocr_status}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-4 flex items-center justify-between">
+                  <span className="text-sm text-slate-600">
+                    {selectedMediaIds.size} of {ocrMediaList.length} selected
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleOcrFromSelected}
+                    disabled={selectedMediaIds.size === 0}
+                    className="glass-button-solid !py-2 !px-4"
+                  >
+                    <PlayCircle className="w-4 h-4 mr-2" />
+                    OCR Selected ({selectedMediaIds.size})
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         <div className="grid gap-4 md:grid-cols-3">
           <div>

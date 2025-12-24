@@ -7,13 +7,15 @@ export class AzureReadProvider implements OCRProvider {
   private endpoint: string;
   private apiVersion: string;
   private subscriptionKey: string;
+  private region: string;
   private pollIntervalMs: number;
   private maxPolls: number;
 
   constructor() {
     this.endpoint = (process.env.OCR_AZURE_ENDPOINT || '').replace(/\/$/, '');
-    this.apiVersion = process.env.OCR_AZURE_API_VERSION || 'v3.2';
+    this.apiVersion = process.env.OCR_AZURE_API_VERSION || 'v4.0';
     this.subscriptionKey = process.env.OCR_AZURE_KEY || '';
+    this.region = process.env.OCR_AZURE_REGION || '';
     this.pollIntervalMs = parseInt(process.env.OCR_AZURE_POLL_INTERVAL_MS || '1000', 10);
     this.maxPolls = parseInt(process.env.OCR_AZURE_MAX_POLLS || '120', 10);
   }
@@ -42,11 +44,16 @@ export class AzureReadProvider implements OCRProvider {
     const analyzeUrl = `${this.endpoint}/vision/${this.apiVersion}/read/analyze`;
     const language = input.language || 'unk';
 
+    const headers: Record<string, string> = {
+      'Ocp-Apim-Subscription-Key': this.subscriptionKey,
+      'Content-Type': contentType,
+    };
+    if (this.region) {
+      headers['Ocp-Apim-Subscription-Region'] = this.region;
+    }
+
     const response = await axios.post(analyzeUrl, input.buffer, {
-      headers: {
-        'Ocp-Apim-Subscription-Key': this.subscriptionKey,
-        'Content-Type': contentType,
-      },
+      headers,
       params: {
         language,
       },
@@ -63,9 +70,7 @@ export class AzureReadProvider implements OCRProvider {
     while (attempt < this.maxPolls) {
       attempt += 1;
       const pollResponse = await axios.get(operationLocation, {
-        headers: {
-          'Ocp-Apim-Subscription-Key': this.subscriptionKey,
-        },
+        headers,
       });
 
       const status = pollResponse.data?.status;

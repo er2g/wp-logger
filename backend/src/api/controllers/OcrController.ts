@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../../types/api.types';
 import ocrRepository from '../../services/database/repositories/OcrRepository';
-import ocrQueueService from '../../services/ocr/OcrQueueService';
+import ocrQueueService, { OcrSettings } from '../../services/ocr/OcrQueueService';
 import logger from '../../utils/logger';
 import { OCRJobMode } from '../../types/database.types';
 
@@ -167,6 +167,68 @@ export class OcrController {
       res.status(500).json({
         success: false,
         error: 'Failed to get OCR result',
+      });
+    }
+  }
+
+  async getSettings(_req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const settings = ocrQueueService.getSettings();
+      res.json({
+        success: true,
+        data: settings,
+      });
+    } catch (error) {
+      logger.error('Get OCR settings failed:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get OCR settings',
+      });
+    }
+  }
+
+  async updateSettings(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const updates = req.body as Partial<OcrSettings>;
+      const settings = ocrQueueService.updateSettings(updates);
+      res.json({
+        success: true,
+        data: settings,
+      });
+    } catch (error) {
+      logger.error('Update OCR settings failed:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to update OCR settings',
+      });
+    }
+  }
+
+  async createJobFromMedia(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { mediaIds, mode } = req.body as { mediaIds?: string[]; mode?: OCRJobMode };
+
+      if (!mediaIds || !Array.isArray(mediaIds) || mediaIds.length === 0) {
+        res.status(400).json({
+          success: false,
+          error: 'mediaIds array is required',
+        });
+        return;
+      }
+
+      const requestedBy = req.user?.userId || null;
+      const jobMode: OCRJobMode = mode === 'missing' || mode === 'failed' ? mode : 'all';
+      const { jobId, queued } = await ocrQueueService.createJobFromMediaIds(requestedBy, mediaIds, jobMode);
+
+      res.json({
+        success: true,
+        data: { id: jobId, queued },
+      });
+    } catch (error) {
+      logger.error('Create OCR job from media failed:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to create OCR job from media',
       });
     }
   }

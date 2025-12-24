@@ -9,6 +9,17 @@ import logger from '../../utils/logger';
 import { OCRJobMode } from '../../types/database.types';
 import websocketServer from '../../websocket/WebSocketServer';
 
+export interface OcrSettings {
+  enabled: boolean;
+  provider: string;
+  fallbackProvider: string;
+  language: string;
+  concurrency: number;
+  pollIntervalMs: number;
+  maxAttempts: number;
+  maxFileSizeMb: number;
+}
+
 export class OcrQueueService {
   private isRunning = false;
   private pollInterval: NodeJS.Timeout | null = null;
@@ -17,10 +28,55 @@ export class OcrQueueService {
   private pollIntervalMs = parseInt(process.env.OCR_POLL_INTERVAL_MS || '5000', 10);
   private maxFileSizeBytes = parseInt(process.env.OCR_MAX_FILE_SIZE_MB || '25', 10) * 1024 * 1024;
   private language = process.env.OCR_LANGUAGE || 'unk';
+  private enabled = process.env.OCR_ENABLED !== 'false';
+
+  getSettings(): OcrSettings {
+    return {
+      enabled: this.enabled,
+      provider: process.env.OCR_PROVIDER || 'azure',
+      fallbackProvider: process.env.OCR_FALLBACK_PROVIDER || '',
+      language: this.language,
+      concurrency: this.concurrency,
+      pollIntervalMs: this.pollIntervalMs,
+      maxAttempts: this.maxAttempts,
+      maxFileSizeMb: Math.round(this.maxFileSizeBytes / (1024 * 1024)),
+    };
+  }
+
+  updateSettings(settings: Partial<OcrSettings>): OcrSettings {
+    if (settings.enabled !== undefined) {
+      this.enabled = settings.enabled;
+      if (this.enabled && !this.pollInterval) {
+        this.start();
+      } else if (!this.enabled && this.pollInterval) {
+        this.stop();
+      }
+    }
+    if (settings.language !== undefined) {
+      this.language = settings.language;
+    }
+    if (settings.concurrency !== undefined && settings.concurrency >= 1 && settings.concurrency <= 10) {
+      this.concurrency = settings.concurrency;
+    }
+    if (settings.pollIntervalMs !== undefined && settings.pollIntervalMs >= 1000 && settings.pollIntervalMs <= 60000) {
+      this.pollIntervalMs = settings.pollIntervalMs;
+      if (this.pollInterval) {
+        this.stop();
+        this.start();
+      }
+    }
+    if (settings.maxAttempts !== undefined && settings.maxAttempts >= 1 && settings.maxAttempts <= 10) {
+      this.maxAttempts = settings.maxAttempts;
+    }
+    if (settings.maxFileSizeMb !== undefined && settings.maxFileSizeMb >= 1 && settings.maxFileSizeMb <= 100) {
+      this.maxFileSizeBytes = settings.maxFileSizeMb * 1024 * 1024;
+    }
+
+    return this.getSettings();
+  }
 
   start(): void {
-    const enabled = process.env.OCR_ENABLED !== 'false';
-    if (!enabled || this.pollInterval) {
+    if (!this.enabled || this.pollInterval) {
       return;
     }
 
@@ -48,6 +104,24 @@ export class OcrQueueService {
     const mediaIds = await this.getMediaIdsForJob(groupId);
     const queued = await ocrRepository.enqueueDocuments(job.id, mediaIds, mode);
     await ocrRepository.updateJobTotals(job.id, queued);
+    if (queued === 0) {
+      await ocrRepository.markJobStatus(job.id, 'completed');
+    }
+
+    this.broadcastJobUpdate(job.id);
+
+    return { jobId: job.id, queued };
+  }
+
+  async createJobFromMediaIds(requestedBy: string | null, mediaIds: string[], mode: OCRJobMode = 'all'): Promise<{ jobId: string; queued: number }> {
+    if (!mediaIds || mediaIds.length === 0) {
+      throw new Error('No media IDs provided');
+    }
+
+    const job = await ocrRepository.createJob(mode, requestedBy);
+    const queued = await ocrRepository.enqueueDocuments(job.id, mediaIds, mode);
+    await ocrRepository.updateJobTotals(job.id, queued);
+
     if (queued === 0) {
       await ocrRepository.markJobStatus(job.id, 'completed');
     }

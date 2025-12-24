@@ -13,6 +13,10 @@ fi
 
 DB_PASSWORD=$(openssl rand -base64 24 | tr -d "\n")
 JWT_SECRET=$(openssl rand -base64 32 | tr -d "\n")
+OCR_AZURE_ENDPOINT=${OCR_AZURE_ENDPOINT:-https://your-resource.cognitiveservices.azure.com}
+OCR_AZURE_KEY=${OCR_AZURE_KEY:-your_azure_key}
+OCR_AZURE_REGION=${OCR_AZURE_REGION:-}
+OCR_AZURE_API_VERSION=${OCR_AZURE_API_VERSION:-v4.0}
 
 sudo mkdir -p /var/lib/wp-logger/whatsapp-session
 sudo chmod 700 /var/lib/wp-logger
@@ -62,9 +66,10 @@ OCR_CONCURRENCY=2
 OCR_POLL_INTERVAL_MS=5000
 OCR_MAX_ATTEMPTS=3
 OCR_MAX_FILE_SIZE_MB=25
-OCR_AZURE_ENDPOINT=https://your-resource.cognitiveservices.azure.com
-OCR_AZURE_KEY=your_azure_key
-OCR_AZURE_API_VERSION=v3.2
+OCR_AZURE_ENDPOINT=${OCR_AZURE_ENDPOINT}
+OCR_AZURE_KEY=${OCR_AZURE_KEY}
+OCR_AZURE_REGION=${OCR_AZURE_REGION}
+OCR_AZURE_API_VERSION=${OCR_AZURE_API_VERSION}
 OCR_AZURE_POLL_INTERVAL_MS=1000
 OCR_AZURE_MAX_POLLS=120
 HISTORY_SYNC_ON_START=true
